@@ -10,7 +10,7 @@ import PIL
 # Top level data directory.
 data_dir = 'data0229'
 
-# Models to choose from [resnet, alexnet, vgg, squeezenet, densenet]
+# Models to choose from [resnet, alexnet, vgg, squeezenet, densenet, 'inception']
 model_names = ['resnet', 'alexnet', 'vgg', 'squeezenet', 'densenet', 'inception']
 
 # Number of classes in the dataset
