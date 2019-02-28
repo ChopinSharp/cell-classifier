@@ -55,7 +55,7 @@ def compute_accuracy(y_gt, y_p):
     return np.sum(y_gt == y_p) / y_gt.shape[0]
 
 
-def validate_models(C_candidates, gamma_candidates, kernel='linear'):
+def validate_models(c_candidates, gamma_candidates, kernel='linear'):
     best_acc = -1
     best_models = None
     best_params = None
@@ -63,8 +63,8 @@ def validate_models(C_candidates, gamma_candidates, kernel='linear'):
     val_acc_tbl = []
 
     time.sleep(0.5)  # pause to show progress bar
-    with tqdm(total=len(C_candidates) * len(gamma_candidates), desc='tuning hyper-parameters') as pbar:
-        for C in C_candidates:
+    with tqdm(total=c_candidates.shape[0] * gamma_candidates.shape[0], desc='tuning hyper-parameters') as pbar:
+        for C in c_candidates:
             train_acc_row = []
             val_acc_row = []
             for gamma in gamma_candidates:
@@ -94,13 +94,13 @@ def validate_models(C_candidates, gamma_candidates, kernel='linear'):
     pd.set_option('display.max_columns', None)
     pd.set_option('display.max_rows', None)
     print('\nTrain Acc:')
-    print(pd.DataFrame(data=train_acc_tbl, index=gamma_candidates, columns=C_candidates))
+    print(pd.DataFrame(data=train_acc_tbl, index=gamma_candidates, columns=c_candidates))
     print('Val Acc:')
-    print(pd.DataFrame(data=val_acc_tbl, index=gamma_candidates, columns=C_candidates))
+    print(pd.DataFrame(data=val_acc_tbl, index=gamma_candidates, columns=c_candidates))
     return best_acc, best_params, best_models
 
 
-base_dir = 'data0229'
+base_dir = 'data0229_classic'
 
 # Extract features
 print('Extracting features ...')
