@@ -213,7 +213,7 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs=25, is_ince
                 # forward, track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     if is_inception and phase == 'train':
-                        # From https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
+                        # https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
                         outputs, aux_outputs = model(inputs)
                         loss1 = criterion(outputs, labels)
                         loss2 = criterion(aux_outputs, labels)
