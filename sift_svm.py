@@ -18,7 +18,7 @@ def feature_extractor(max_num_kp=100, enable_enhance=True, enable_warning=True, 
         labels = np.zeros(num_samples, dtype=np.int8)
 
         warning_log = []
-        enhanced_flags = np.zeros(num_samples, dtype=np.float32)
+        # enhanced_flags = np.zeros(num_samples, dtype=np.float32)
 
         time.sleep(0.5)  # pause to show progress bar
         for idx, name in enumerate(tqdm(file_names, desc='extracting features from ' + data_dir)):
@@ -26,17 +26,12 @@ def feature_extractor(max_num_kp=100, enable_enhance=True, enable_warning=True, 
             img = cv2.imread(os.path.join(data_dir, name), cv2.IMREAD_GRAYSCALE)
             kp, feature = sift.detectAndCompute(img, None)
             # Enhance image if not enough key points found
-            if enable_enhance:
-                if len(kp) < max_num_kp:
-                    img_enhanced = cv2.equalizeHist(img)
-                    kp, feature = sift.detectAndCompute(img_enhanced, None)
-                    enhanced_flags[idx] = 1
-                else:
-                    enhanced_flags[idx] = -1
+            if enable_enhance and len(kp) < max_num_kp:
+                img_enhanced = cv2.equalizeHist(img)
+                kp, feature = sift.detectAndCompute(img_enhanced, None)
             num_kp = len(kp)
             if num_kp == 0:
                 warning_log.append(' * Unable to extract features for %s' % name)
-                labels[idx] = -1  # mark as UNRECOGNIZABLE
                 continue
             elif num_kp < max_num_kp:
                 warning_log.append(' + Not enough key points found in %s : %d/%d!' % (name, len(kp), max_num_kp))
@@ -49,8 +44,6 @@ def feature_extractor(max_num_kp=100, enable_enhance=True, enable_warning=True, 
         time.sleep(0.5)  # pause to show progress bar
 
         features = features.reshape(num_samples, -1)
-        if enable_enhance:
-            features = np.hstack((features, enhanced_flags[:, np.newaxis]))
 
         if enable_warning:
             for line in warning_log:
@@ -113,14 +106,14 @@ base_dir = 'data0229_svm'
 
 # Extract features
 print('Extracting features ...')
-extract_features = feature_extractor(enable_enhance=True)
+extract_features = feature_extractor(max_num_kp=100, enable_enhance=True)
 train_fts, train_labels = extract_features(os.path.join(base_dir, 'train'))
 val_fts, val_labels = extract_features(os.path.join(base_dir, 'val'))
 test_fts, test_labels = extract_features(os.path.join(base_dir, 'test'))
 
 # Validate & Test models
 print('\nValidating model ...')
-val_acc, params, models = validate_models(np.logspace(-10, 6, 7), 1 / np.logspace(-10, 10, 7), kernel='linear')
+val_acc, params, models = validate_models(np.logspace(-10, 3, 7), 1 / np.logspace(-10, 10, 7), kernel='linear')
 print()
 for best_param, best_model in zip(params, models):
     preds = best_model.predict(test_fts)
