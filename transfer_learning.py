@@ -496,13 +496,13 @@ def show_saliency_maps(model, inputs, labels, images, class_names):
     saliency = saliency.numpy().clip(0, 1)
 
     # Show images and saliency maps together
-    N = images.shape[0]
-    for i in range(N):
-        plt.subplot(2, N, i + 1)
+    number_samples = images.shape[0]
+    for i in range(number_samples):
+        plt.subplot(2, number_samples, i + 1)
         plt.imshow(images[i])
         plt.axis('off')
         plt.title(class_names[labels[i]] + '[T]' if acc_flags[i] else '[F]')
-        plt.subplot(2, N, N + i + 1)
+        plt.subplot(2, number_samples, number_samples + i + 1)
         plt.imshow(saliency[i], cmap=plt.cm.hot)
         plt.axis('off')
         plt.gcf().set_size_inches(12, 5)
