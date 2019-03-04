@@ -339,7 +339,7 @@ def test_model(model, dataloaders, is_inception=False):
     return test_acc
 
 
-def train(model_name='squeezenet', data_dir='data0229_dp', model_dir='models', plot_dir=None, num_classes=3,
+def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_dir=None, num_classes=3,
           batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(0.0,)):
     """
     Train and validate chosen model with set(s) of hyper-parameters,
@@ -567,6 +567,6 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
 
 
 if __name__ == '__main__':
-    # train(plot_dir='figs', num_epochs=25, weight_decays=np.logspace(-8, -2, 5))
+    train(plot_dir='figs', num_epochs=25, weight_decays=np.logspace(-8, -2, 5))
     # train()
-    visualize_model()
+    # visualize_model()
