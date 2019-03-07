@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, models, transforms
-import numpy as np
+# import numpy as np
 import matplotlib.pyplot as plt
 import PIL
 import warnings
@@ -306,20 +306,22 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs, is_incepti
     return model, val_acc_history, loss_history
 
 
-def test_model(model, dataloaders, is_inception=False):
+def test_model(model, dataloader, is_inception=False):
     """
     Test model.
     :param model: Model to test.
-    :param dataloaders: Dataloader of test set.
+    :param dataloader: Dataloader of test set.
     :param is_inception: Using Inception model or not.
     :return test_acc: Test accuracy.
+    :return avg_conf: Average confidence of the prediction.
     """
 
     model.eval()
     running_corrects = 0
+    sum_conf = 0.0
 
     # Iterate over data.
-    for inputs, labels in dataloaders['test']:
+    for inputs, labels in iter(dataloader):
         inputs = inputs.to(device)
         labels = labels.to(device)
 
@@ -330,17 +332,20 @@ def test_model(model, dataloaders, is_inception=False):
             else:
                 outputs = model(inputs)
             _, preds = torch.max(outputs, 1)
+            probs = nn.functional.softmax(outputs, dim=1)
 
         # statistics
         running_corrects += torch.sum(preds == labels.data)
+        sum_conf += probs[torch.arange(probs.size()[0]), preds].sum()
 
-    test_acc = running_corrects.double() / len(dataloaders['test'].dataset)
+    test_acc = running_corrects.double() / len(dataloader.dataset)
+    avg_conf = sum_conf / len(dataloader.dataset)
 
-    return test_acc
+    return test_acc, avg_conf
 
 
 def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_dir=None, num_classes=3,
-          batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(0.0,)):
+          batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,)):
     """
     Train and validate chosen model with set(s) of hyper-parameters,
     plot the training process, save the model if required, and print out
@@ -434,7 +439,7 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
                 best_wd = weight_decay
 
         # Test model
-        test_acc = test_model(best_model, dataloaders)
+        test_acc, _ = test_model(best_model, dataloaders['test'])
         print('Model at lr=%e, wd=%e has the highest val acc: %.4f' % (best_lr, best_wd, best_val_acc))
         print('Test Acc: %.4f' % test_acc)
 
@@ -558,15 +563,62 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
         for x in ['input', 'show']
     }
 
-    # Sample a batch of data
-    inputs, labels = next(iter(dataloaders['input']))
-    images, _ = next(iter(dataloaders['show']))
-
     # Show saliency maps
-    show_saliency_maps(model_ft, inputs, labels, images, class_names)
+    for (inputs, labels), (images, _) in zip(dataloaders['input'], dataloaders['show']):
+        show_saliency_maps(model_ft, inputs, labels, images, class_names)
+
+
+def test_temperature_scaling():
+    # Reference to https://github.com/gpleiss/temperature_scaling
+    from temperature_scaling import ModelWithTemperature
+    # Load saved model
+    model_dir = 'models'
+    model_file_name = os.listdir(model_dir)[0]  # load first model file by default
+    model_name = model_file_name.split('-')[0]
+    original_model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
+    original_model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
+    original_model.eval()
+
+    data_dir = 'data0229_dp'
+    batch_size = 4
+    dataloaders, dataset_mean, dataset_std = \
+        create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
+    valid_loader = dataloaders['val']
+    scaled_model = ModelWithTemperature(original_model)
+    scaled_model.set_temperature(valid_loader)
+
+    test_loader = dataloaders['test']
+    acc, conf = test_model(original_model, test_loader)
+    print('Original model: acc=%.4f, conf=%.4f'% (acc, conf))
+    acc, conf = test_model(scaled_model, test_loader)
+    print('Scaled model: acc=%.4f, conf=%.4f' % (acc, conf))
+
+
+def convert_to_torch_script():
+    # Load saved model
+    model_dir = 'models'
+    model_file_name = os.listdir(model_dir)[0]  # load first model file by default
+    model_name = model_file_name.split('-')[0]
+    model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
+    model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
+    model.eval()
+
+    # An example input you would normally provide to your model's forward() method.
+    input_size = available_models_input_size[model_name]
+    example = torch.rand(1, 3, input_size, input_size)
+
+    # Use torch.jit.trace to generate a torch.jit.ScriptModule via tracing.
+    traced_script_module = torch.jit.trace(model, example)
+    traced_script_module.save('model_scripts/model_script.pt')
+    print('Saving Torch Script done')
 
 
 if __name__ == '__main__':
-    train(plot_dir='figs', num_epochs=25, weight_decays=np.logspace(-8, -2, 5))
-    # train()
+    # train(num_epochs=30, model_dir='models', plot_dir='figs')
     # visualize_model()
+    # test_temperature_scaling()
+    convert_to_torch_script()
+    pass
+
+
+
