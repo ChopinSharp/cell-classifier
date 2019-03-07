@@ -1,4 +1,6 @@
-trail.py
+scratch.py
 data*/
 .idea/
-
+test*
+figs/
+models/
