@@ -569,6 +569,7 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
 
 
 def test_temperature_scaling():
+    # Reference to https://github.com/gpleiss/temperature_scaling
     from temperature_scaling import ModelWithTemperature
     # Load saved model
     model_dir = 'models'
@@ -593,10 +594,30 @@ def test_temperature_scaling():
     print('Scaled model: acc=%.4f, conf=%.4f' % (acc, conf))
 
 
+def convert_to_torch_script():
+    # Load saved model
+    model_dir = 'models'
+    model_file_name = os.listdir(model_dir)[0]  # load first model file by default
+    model_name = model_file_name.split('-')[0]
+    model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
+    model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
+    model.eval()
+
+    # An example input you would normally provide to your model's forward() method.
+    input_size = available_models_input_size[model_name]
+    example = torch.rand(1, 3, input_size, input_size)
+
+    # Use torch.jit.trace to generate a torch.jit.ScriptModule via tracing.
+    traced_script_module = torch.jit.trace(model, example)
+    traced_script_module.save('model_scripts/model_script.pt')
+    print('Saving Torch Script done')
+
+
 if __name__ == '__main__':
     # train(num_epochs=30, model_dir='models', plot_dir='figs')
     # visualize_model()
     # test_temperature_scaling()
+    convert_to_torch_script()
     pass
 
 
