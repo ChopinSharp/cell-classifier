@@ -362,15 +362,19 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
     :param weight_decays: Candidates of weight decays to use.
     """
 
+    # Make sure model type is valid
     assert model_name in available_models_input_size.keys(), 'Unsupported model type ' + model_name
     print('Using %s ...\n' % model_name)
+
+    # Record start time
+    since = time.time()
 
     # Create dataloaders
     print('Loading dataset ...\n')
     dataloaders, dataset_mean, dataset_std = \
         create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
-    print('+ Dataset mean:', dataset_mean.tolist())
-    print('+ Dataset standard deviation:', dataset_std.tolist())
+    print('+ Dataset mean:', dataset_mean[0].item())
+    print('+ Dataset standard deviation:', dataset_std[1].item())
     dataset_sizes = {x: len(dataloaders[x].dataset) for x in ['train', 'val', 'test']}
     print('+ %(train)d samples for training, %(val)d for validation, %(test)d for test.\n' % dataset_sizes)
 
@@ -438,21 +442,28 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
                 best_lr = learning_rate
                 best_wd = weight_decay
 
-        # Test model
-        test_acc, _ = test_model(best_model, dataloaders['test'])
-        print('Model at lr=%e, wd=%e has the highest val acc: %.4f' % (best_lr, best_wd, best_val_acc))
-        print('Test Acc: %.4f' % test_acc)
+    # Print out train result
+    time_elapsed = time.time() - since
+    print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+    print('Model at lr=%e, wd=%e has the highest val acc: %.4f' % (best_lr, best_wd, best_val_acc))
 
-        # Save the best model to disk
-        if model_dir is not None:
-            timestamp = time.ctime().split()
-            info_list = [
-                model_name,  # model type
-                timestamp[-1], timestamp[1], timestamp[2], *(timestamp[3].split(':')),  # timestamp
-                '%.4e-%.4e' % (best_lr, best_wd)  # hyper-parameters used
-            ]
-            file_name = '-'.join(info_list) + '.pt'
-            torch.save(best_model.state_dict(), os.path.join(model_dir, file_name))
+    # Test model
+    test_acc, _ = test_model(best_model, dataloaders['test'])
+    print('\nTest Acc: %.4f' % test_acc)
+
+    # Save the best model to disk
+    if model_dir is not None:
+        print('\nSaving model ...')
+        timestamp = time.ctime().split()
+        info_list = [
+            model_name,  # model type
+            timestamp[-1], timestamp[1], timestamp[2], *(timestamp[3].split(':')),  # timestamp
+            '%.4e%%%.4e' % (best_lr, best_wd),  # hyper-parameters used
+            str(dataset_mean[0].item()),
+            str(dataset_std[1].item())
+        ]
+        file_name = '%'.join(info_list) + '.pt'
+        torch.save(best_model.state_dict(), os.path.join(model_dir, file_name))
 
 
 def compute_saliency_maps(model, inputs, labels):
@@ -524,7 +535,7 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
 
     # Load saved model
     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-    model_name = model_file_name.split('-')[0]
+    model_name = model_file_name.split('%')[0]
     model_ft, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
     model_ft.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
     model_ft.eval()
@@ -574,7 +585,7 @@ def test_temperature_scaling():
     # Load saved model
     model_dir = 'models'
     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-    model_name = model_file_name.split('-')[0]
+    model_name = model_file_name.split('%')[0]
     original_model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
     original_model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
     original_model.eval()
@@ -598,7 +609,7 @@ def convert_to_torch_script():
     # Load saved model
     model_dir = 'models'
     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-    model_name = model_file_name.split('-')[0]
+    model_name = model_file_name.split('%')[0]
     model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
     model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
     model.eval()
@@ -614,10 +625,10 @@ def convert_to_torch_script():
 
 
 if __name__ == '__main__':
-    # train(num_epochs=30, model_dir='models', plot_dir='figs')
+    train(num_epochs=30, model_dir='models')
     # visualize_model()
     # test_temperature_scaling()
-    convert_to_torch_script()
+    # convert_to_torch_script()
     pass
 
 
