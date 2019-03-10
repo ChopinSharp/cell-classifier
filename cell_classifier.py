@@ -7,7 +7,7 @@ from PIL import Image
 from transfer_learning import initialize_model, available_models_input_size
 
 
-class Cell_Classifier():
+class CellClassifier:
 
     def __init__(self, model_file_name):
         # Load saved model
@@ -27,11 +27,11 @@ class Cell_Classifier():
 
     def predict_single_img(self, url):
         img = Image.open(url).convert('RGB')
-        input = self.data_transforms(img)
-        input = input.view(1, *input.size())
+        input_tensor = self.data_transforms(img)
+        input_tensor = input_tensor.view(1, *input_tensor.size())
 
         with torch.no_grad():
-            scores = self.model(input)[0]
+            scores = self.model(input_tensor)[0]
             pred = scores.argmax().item()
             probs = torch.nn.functional.softmax(scores, dim=0)
 
@@ -41,9 +41,8 @@ class Cell_Classifier():
             print('\t%s:\t%.4f' % (class_name, prob))
 
 
-
 if __name__ == '__main__':
-    classifier = Cell_Classifier(
+    classifier = CellClassifier(
         'squeezenet%2019%Mar%9%18%20%51%1.0000e-03-1.0000e-05%0.12072154879570007%0.13905109465122223.pt'
     )
     classifier.predict_single_img('data0229_dp/test/aggregated/3(2).jpg')
