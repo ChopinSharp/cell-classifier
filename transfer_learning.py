@@ -9,6 +9,8 @@ import warnings
 import time
 import os
 import copy
+# Reference to https://github.com/gpleiss/temperature_scaling
+from temperature_scaling import ModelWithTemperature
 
 # Device to use in training
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -345,7 +347,8 @@ def test_model(model, dataloader, is_inception=False):
 
 
 def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_dir=None, num_classes=3,
-          batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,)):
+          batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,),
+          temperature_scaling=False):
     """
     Train and validate chosen model with set(s) of hyper-parameters,
     plot the training process, save the model if required, and print out
@@ -360,6 +363,8 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
     :param feature_extract: Feature extracting or finetuning.
     :param learning_rates: Candidates of learning rates to use.
     :param weight_decays: Candidates of weight decays to use.
+    :param temperature_scaling: Use temperature scaling to calibrate logits output or not.
+    :return: best model during training.
     """
 
     # Make sure model type is valid
@@ -447,6 +452,10 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Model at lr=%e, wd=%e has the highest val acc: %.4f' % (best_lr, best_wd, best_val_acc))
 
+    # Temperature scaling
+    if temperature_scaling:
+        best_model = ModelWithTemperature(best_model, dataloaders['val'])
+
     # Test model
     test_acc, _ = test_model(best_model, dataloaders['test'])
     print('\nTest Acc: %.4f' % test_acc)
@@ -464,6 +473,8 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
         ]
         file_name = '%'.join(info_list) + '.pt'
         torch.save(best_model.state_dict(), os.path.join(model_dir, file_name))
+
+    return best_model
 
 
 def compute_saliency_maps(model, inputs, labels):
@@ -580,8 +591,6 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
 
 
 def test_temperature_scaling():
-    # Reference to https://github.com/gpleiss/temperature_scaling
-    from temperature_scaling import ModelWithTemperature
     # Load saved model
     model_dir = 'models'
     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
@@ -595,14 +604,17 @@ def test_temperature_scaling():
     dataloaders, dataset_mean, dataset_std = \
         create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
     valid_loader = dataloaders['val']
-    scaled_model = ModelWithTemperature(original_model)
-    scaled_model.set_temperature(valid_loader)
+    scaled_model = ModelWithTemperature(original_model, valid_loader)
+
+    print(original_model)
+    print('*'*20)
+    print(scaled_model)
 
     test_loader = dataloaders['test']
     acc, conf = test_model(original_model, test_loader)
-    print('Original model: acc=%.4f, conf=%.4f'% (acc, conf))
+    print('Original model: acc=%.4f, avg_conf=%.4f'% (acc, conf))
     acc, conf = test_model(scaled_model, test_loader)
-    print('Scaled model: acc=%.4f, conf=%.4f' % (acc, conf))
+    print('Scaled model: acc=%.4f, avg_conf=%.4f' % (acc, conf))
 
 
 def convert_to_torch_script():

@@ -2,75 +2,75 @@ import torch
 from torch import nn, optim
 from torch.nn import functional as F
 
-
 class ModelWithTemperature(nn.Module):
     """
-    A thin decorator, which wraps a model with temperature scaling
-    model (nn.Module):
-        A classification neural network
-        NB: Output of the neural network should be the classification logits,
-            NOT the softmax (or log softmax)!
+    A thin decorator, which wraps a trained model with temperature scaling.
     """
-    def __init__(self, model):
+
+    def __init__(self, model, val_loader, verbose=False):
+
         super(ModelWithTemperature, self).__init__()
         self.model = model
-        self.temperature = nn.Parameter(torch.ones(1) * 1.5)
+        self.temperature = torch.tensor(1.5)
+        self.__set_temperature(val_loader, verbose)
 
-    def forward(self, input):
-        logits = self.model(input)
-        return self.temperature_scale(logits)
+    def __set_temperature(self, val_loader, verbose):
+        """
+        Tune the temperature of the model on the validation set by optimizing NLL.
+        :param val_loader: Validation loader.
+        :param verbose: Verbose flag for testing.
+        """
 
-    def temperature_scale(self, logits):
-        """
-        Perform temperature scaling on logits
-        """
-        # Expand temperature to match the size of logits
-        temperature = self.temperature.unsqueeze(1).expand(logits.size(0), logits.size(1))
-        return logits / temperature
+        # Track gradient for temperature parameter
+        self.temperature.requires_grad_(True)
 
-    # This function probably should live outside of this class, but whatever
-    def set_temperature(self, valid_loader):
-        """
-        Tune the tempearature of the model (using the validation set).
-        We're going to set it to optimize NLL.
-        valid_loader (DataLoader): validation set loader
-        """
+        # Declare criterions
         nll_criterion = nn.CrossEntropyLoss()
         ece_criterion = _ECELoss()
 
-        # First: collect all the logits and labels for the validation set
+        # Collect all the logits and labels of the validation set
         logits_list = []
         labels_list = []
         with torch.no_grad():
-            for input, label in valid_loader:
-                input = input
-                logits = self.model(input)
+            for inputs, labels in val_loader:
+                logits = self.model(inputs)
                 logits_list.append(logits)
-                labels_list.append(label)
-            logits = torch.cat(logits_list)
-            labels = torch.cat(labels_list)
+                labels_list.append(labels)
+            logits_val = torch.cat(tuple(logits_list))
+            labels_val = torch.cat(tuple(labels_list))
 
-        # Calculate NLL and ECE before temperature scaling
-        before_temperature_nll = nll_criterion(logits, labels).item()
-        before_temperature_ece = ece_criterion(logits, labels).item()
-        print('Before temperature - NLL: %.3f, ECE: %.3f' % (before_temperature_nll, before_temperature_ece))
-
-        # Next: optimize the temperature w.r.t. NLL
-        optimizer = optim.LBFGS([self.temperature], lr=0.01, max_iter=50)
-
-        def eval():
-            loss = nll_criterion(self.temperature_scale(logits), labels)
+        # Optimize the temperature w.r.t. NLL
+        def __update():
+            loss = nll_criterion(logits_val.div(self.temperature), labels_val)
             loss.backward()
             return loss
-        optimizer.step(eval)
 
-        # Calculate NLL and ECE after temperature scaling
-        after_temperature_nll = nll_criterion(self.temperature_scale(logits), labels).item()
-        after_temperature_ece = ece_criterion(self.temperature_scale(logits), labels).item()
-        print('Optimal temperature: %.3f' % self.temperature.item())
-        print('After temperature - NLL: %.3f, ECE: %.3f' % (after_temperature_nll, after_temperature_ece))
+        optimizer = optim.LBFGS([self.temperature], lr=0.01, max_iter=50)
+        optimizer.step(__update)
 
-        return self
+        # Print out stats if verbose flag is set
+        if verbose:
+            nll_before_scaling = nll_criterion(logits_val, labels_val).item()
+            ece_before_scaling = ece_criterion(logits_val, labels_val).item()
+            nll_after_scaling = nll_criterion(logits_val.div(self.temperature), labels_val).item()
+            ece_after_scaling = ece_criterion(logits_val.div(self.temperature), labels_val).item()
+            print('Optimal temperature: %.3f' % self.temperature.item())
+            print('Before temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_before_scaling, ece_before_scaling))
+            print('After temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_after_scaling, ece_after_scaling))
+
+        # Stop tracking gradient for temperature parameter
+        self.temperature.requires_grad_(False)
+
+
+    def forward(self, inputs):
+        """
+        Forward pass with temperature scale.
+        :param inputs: inputs to the model.
+        :return: Temperature scaled logits output.
+        """
+
+        logits = self.model(inputs)
+        return logits.div(self.temperature)
 
 
 class _ECELoss(nn.Module):
