@@ -625,9 +625,9 @@ def convert_to_torch_script():
 
 
 if __name__ == '__main__':
-    train(num_epochs=30, model_dir='models')
+    # train(num_epochs=30, model_dir='models')
     # visualize_model()
-    # test_temperature_scaling()
+    test_temperature_scaling()
     # convert_to_torch_script()
     pass
 
