@@ -373,8 +373,8 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
     print('Loading dataset ...\n')
     dataloaders, dataset_mean, dataset_std = \
         create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
-    print('+ Dataset mean:', dataset_mean[0].item())
-    print('+ Dataset standard deviation:', dataset_std[1].item())
+    print('+ Dataset mean:', dataset_mean.tolist()[0])
+    print('+ Dataset standard deviation:', dataset_std.tolist()[0])
     dataset_sizes = {x: len(dataloaders[x].dataset) for x in ['train', 'val', 'test']}
     print('+ %(train)d samples for training, %(val)d for validation, %(test)d for test.\n' % dataset_sizes)
 
@@ -459,8 +459,8 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
             model_name,  # model type
             timestamp[-1], timestamp[1], timestamp[2], *(timestamp[3].split(':')),  # timestamp
             '%.4e%%%.4e' % (best_lr, best_wd),  # hyper-parameters used
-            str(dataset_mean[0].item()),
-            str(dataset_std[1].item())
+            str(dataset_mean.tolist()[0]),
+            str(dataset_std.tolist()[0])
         ]
         file_name = '%'.join(info_list) + '.pt'
         torch.save(best_model.state_dict(), os.path.join(model_dir, file_name))

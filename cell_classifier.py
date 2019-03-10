@@ -1,6 +1,6 @@
 import torch
 import os
-from torchvision import datasets, models, transforms
+from torchvision import transforms
 
 from PIL import Image
 
@@ -27,8 +27,7 @@ class CellClassifier:
 
     def predict_single_img(self, url):
         img = Image.open(url).convert('RGB')
-        input_tensor = self.data_transforms(img)
-        input_tensor = input_tensor.view(1, *input_tensor.size())
+        input_tensor = self.data_transforms(img).unsqueeze(dim=0)
 
         with torch.no_grad():
             scores = self.model(input_tensor)[0]
