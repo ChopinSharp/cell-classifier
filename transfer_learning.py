@@ -9,8 +9,8 @@ import warnings
 import time
 import os
 import copy
-# Reference to https://github.com/gpleiss/temperature_scaling
-from temperature_scaling import ModelWithTemperature
+from temperature_scaling import compute_temperature
+
 
 # Device to use in training
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -346,15 +346,15 @@ def test_model(model, dataloader, is_inception=False):
     return test_acc, avg_conf
 
 
-def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_dir=None, num_classes=3,
+def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_classes=3,
           batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,),
-          temperature_scaling=False):
+          temperature_scaling=True):
     """
     Train and validate chosen model with set(s) of hyper-parameters,
     plot the training process, save the model if required, and print out
     the test acc(s) in the end.
-    :param model_name: Model to use.
     :param data_dir: Top level data directory.
+    :param model_name: Model to use.
     :param model_dir: Directory to save trained model.
     :param plot_dir: Directory to save training plots.
     :param num_classes: Total number of target classes.
@@ -453,8 +453,7 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
     print('Model at lr=%e, wd=%e has the highest val acc: %.4f' % (best_lr, best_wd, best_val_acc))
 
     # Temperature scaling
-    if temperature_scaling:
-        best_model = ModelWithTemperature(best_model, dataloaders['val'])
+    temperature = compute_temperature(best_model, dataloaders['val']) if temperature_scaling else 1.0
 
     # Test model
     test_acc, _ = test_model(best_model, dataloaders['test'])
@@ -462,18 +461,21 @@ def train(model_name='squeezenet', data_dir='data0229_dp', model_dir=None, plot_
 
     # Save the best model to disk
     if model_dir is not None:
+        os.makedirs(model_dir, exist_ok=True)
         print('\nSaving model ...')
         timestamp = time.ctime().split()
         info_list = [
             model_name,  # model type
             timestamp[-1], timestamp[1], timestamp[2], *(timestamp[3].split(':')),  # timestamp
             '%.4e%%%.4e' % (best_lr, best_wd),  # hyper-parameters used
+            '%.3f' % temperature,  # temperature of the model
             str(dataset_mean.tolist()[0]),
             str(dataset_std.tolist()[0])
         ]
         file_name = '%'.join(info_list) + '.pt'
-        torch.save(best_model.state_dict(), os.path.join(model_dir, file_name))
-
+        file_url = os.path.join(model_dir, file_name)
+        torch.save(best_model.state_dict(), file_url)
+        print('\nModel saved to %s\n' % file_url)
     return best_model
 
 
@@ -591,6 +593,7 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
 
 
 def test_temperature_scaling():
+    from temperature_scaling_ref import ModelWithTemperature
     # Load saved model
     model_dir = 'models'
     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
@@ -604,11 +607,10 @@ def test_temperature_scaling():
     dataloaders, dataset_mean, dataset_std = \
         create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
     valid_loader = dataloaders['val']
-    scaled_model = ModelWithTemperature(original_model, valid_loader)
-
-    print(original_model)
-    print('*'*20)
-    print(scaled_model)
+    temperature = compute_temperature(original_model, valid_loader, verbose=True)
+    print('*' * 20)
+    scaled_model = ModelWithTemperature(original_model)
+    scaled_model.set_temperature(valid_loader)
 
     test_loader = dataloaders['test']
     acc, conf = test_model(original_model, test_loader)
@@ -637,9 +639,9 @@ def convert_to_torch_script():
 
 
 if __name__ == '__main__':
-    # train(num_epochs=30, model_dir='models')
+    train('./data0229_dp', num_epochs=30, model_dir='models')
     # visualize_model()
-    test_temperature_scaling()
+    # test_temperature_scaling()
     # convert_to_torch_script()
     pass
 
