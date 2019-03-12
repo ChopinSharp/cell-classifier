@@ -160,7 +160,7 @@ def estimate_dataset_mean_and_std(data_dir, input_size):
         dataset_std += torch.mean((inputs - dataset_mean.reshape((1, 3, 1, 1))) ** 2, dim=(0, 2, 3))
     dataset_std = torch.sqrt(dataset_std / num_batches)
 
-    return dataset_mean, dataset_std
+    return dataset_mean.tolist(), dataset_std.tolist()
 
 
 def create_dataloaders(data_dir, input_size, batch_size):
@@ -318,7 +318,6 @@ def test_model(model, dataloader, is_inception=False):
     :return avg_conf: Average confidence of the prediction.
     """
 
-    model.eval()
     running_corrects = 0
     sum_conf = 0.0
 
@@ -347,8 +346,7 @@ def test_model(model, dataloader, is_inception=False):
 
 
 def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_classes=3,
-          batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,),
-          temperature_scaling=True):
+          batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,)):
     """
     Train and validate chosen model with set(s) of hyper-parameters,
     plot the training process, save the model if required, and print out
@@ -363,7 +361,6 @@ def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_
     :param feature_extract: Feature extracting or finetuning.
     :param learning_rates: Candidates of learning rates to use.
     :param weight_decays: Candidates of weight decays to use.
-    :param temperature_scaling: Use temperature scaling to calibrate logits output or not.
     :return: best model during training.
     """
 
@@ -378,8 +375,8 @@ def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_
     print('Loading dataset ...\n')
     dataloaders, dataset_mean, dataset_std = \
         create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
-    print('+ Dataset mean:', dataset_mean.tolist()[0])
-    print('+ Dataset standard deviation:', dataset_std.tolist()[0])
+    print('+ Dataset mean:', dataset_mean[0])
+    print('+ Dataset standard deviation:', dataset_std[0])
     dataset_sizes = {x: len(dataloaders[x].dataset) for x in ['train', 'val', 'test']}
     print('+ %(train)d samples for training, %(val)d for validation, %(test)d for test.\n' % dataset_sizes)
 
@@ -453,7 +450,15 @@ def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_
     print('Model at lr=%e, wd=%e has the highest val acc: %.4f' % (best_lr, best_wd, best_val_acc))
 
     # Temperature scaling
-    temperature = compute_temperature(best_model, dataloaders['val']) if temperature_scaling else 1.0
+    print('\nComputing temperature ...')
+    temperature = compute_temperature(best_model, dataloaders['val'], verbose=True)
+
+    # For dev purpose ...
+    os.makedirs('modules', exist_ok=True)
+    torch.save(best_model.state_dict(), 'modules/model.pt')
+
+    # Convert to torch script for inference efficiency
+    best_model = convert_to_torch_script(best_model, available_models_input_size[model_name])
 
     # Test model
     test_acc, _ = test_model(best_model, dataloaders['test'])
@@ -463,19 +468,18 @@ def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_
     if model_dir is not None:
         os.makedirs(model_dir, exist_ok=True)
         print('\nSaving model ...')
-        timestamp = time.ctime().split()
         info_list = [
-            model_name,  # model type
-            timestamp[-1], timestamp[1], timestamp[2], *(timestamp[3].split(':')),  # timestamp
-            '%.4e%%%.4e' % (best_lr, best_wd),  # hyper-parameters used
-            '%.3f' % temperature,  # temperature of the model
-            str(dataset_mean.tolist()[0]),
-            str(dataset_std.tolist()[0])
+            model_name,                         # model type
+            time.ctime().replace(':', '#'),     # timestamp
+            '%.3f' % temperature,               # temperature of the model
+            '%.5f' % dataset_mean[0],
+            '%.5f' % dataset_std[0]
         ]
         file_name = '%'.join(info_list) + '.pt'
         file_url = os.path.join(model_dir, file_name)
-        torch.save(best_model.state_dict(), file_url)
+        best_model.save(file_url)
         print('\nModel saved to %s\n' % file_url)
+
     return best_model
 
 
@@ -592,54 +596,54 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
         show_saliency_maps(model_ft, inputs, labels, images, class_names)
 
 
-def test_temperature_scaling():
-    from temperature_scaling_ref import ModelWithTemperature
-    # Load saved model
-    model_dir = 'models'
-    model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-    model_name = model_file_name.split('%')[0]
-    original_model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
-    original_model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
-    original_model.eval()
+# def test_temperature_scaling():
+#     from temperature_scaling_ref import ModelWithTemperature
+#     # Load saved model
+#     model_dir = 'models'
+#     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
+#     model_name = model_file_name.split('%')[0]
+#     original_model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
+#     original_model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
+#     original_model.eval()
+#
+#     data_dir = 'data0229_dp'
+#     batch_size = 4
+#     dataloaders, dataset_mean, dataset_std = \
+#         create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
+#     valid_loader = dataloaders['val']
+#     temperature = compute_temperature(original_model, valid_loader, verbose=True)
+#     print('*' * 20)
+#     scaled_model = ModelWithTemperature(original_model)
+#     scaled_model.set_temperature(valid_loader)
+#
+#     test_loader = dataloaders['test']
+#     acc, conf = test_model(original_model, test_loader)
+#     print('Original model: acc=%.4f, avg_conf=%.4f'% (acc, conf))
+#     acc, conf = test_model(scaled_model, test_loader)
+#     print('Scaled model: acc=%.4f, avg_conf=%.4f' % (acc, conf))
 
-    data_dir = 'data0229_dp'
-    batch_size = 4
-    dataloaders, dataset_mean, dataset_std = \
-        create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
-    valid_loader = dataloaders['val']
-    temperature = compute_temperature(original_model, valid_loader, verbose=True)
-    print('*' * 20)
-    scaled_model = ModelWithTemperature(original_model)
-    scaled_model.set_temperature(valid_loader)
 
-    test_loader = dataloaders['test']
-    acc, conf = test_model(original_model, test_loader)
-    print('Original model: acc=%.4f, avg_conf=%.4f'% (acc, conf))
-    acc, conf = test_model(scaled_model, test_loader)
-    print('Scaled model: acc=%.4f, avg_conf=%.4f' % (acc, conf))
+def convert_to_torch_script(model, input_size):
+    """
+    Convert torch.nn.Module to torch.jit.ScriptModule via tracing.
+    :param model: trained torch.nn.Module instance.
+    :param input_size: input size of the model.
+    :return: traced torch.jit.ScriptModule instance.
+    """
 
-
-def convert_to_torch_script():
-    # Load saved model
-    model_dir = 'models'
-    model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-    model_name = model_file_name.split('%')[0]
-    model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
-    model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
     model.eval()
 
     # An example input you would normally provide to your model's forward() method.
-    input_size = available_models_input_size[model_name]
     example = torch.rand(1, 3, input_size, input_size)
 
     # Use torch.jit.trace to generate a torch.jit.ScriptModule via tracing.
     traced_script_module = torch.jit.trace(model, example)
-    traced_script_module.save('model_scripts/model_script.pt')
-    print('Saving Torch Script done')
+
+    return traced_script_module
 
 
 if __name__ == '__main__':
-    train('./data0229_dp', num_epochs=30, model_dir='models')
+    train('./data0229_dp', num_epochs=25, model_dir='models')
     # visualize_model()
     # test_temperature_scaling()
     # convert_to_torch_script()

@@ -39,9 +39,9 @@ def compute_temperature(model, val_loader=None, verbose=False):
         ece_before_scaling = ece_criterion(logits_val, labels_val).item()
         nll_after_scaling = nll_criterion(logits_val.div(temperature), labels_val).item()
         ece_after_scaling = ece_criterion(logits_val.div(temperature), labels_val).item()
-        print('Optimal temperature: %.3f' % temperature.item())
-        print('Before temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_before_scaling, ece_before_scaling))
-        print('After temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_after_scaling, ece_after_scaling))
+        print('+ Optimal temperature: %.3f' % temperature.item())
+        print('+ Before temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_before_scaling, ece_before_scaling))
+        print('+ After temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_after_scaling, ece_after_scaling))
 
     return temperature.item()
 
