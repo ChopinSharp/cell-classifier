@@ -4,7 +4,7 @@ import torch.optim as optim
 from torchvision import datasets, models, transforms
 # import numpy as np
 import matplotlib.pyplot as plt
-import PIL
+from PIL import Image
 import warnings
 import time
 import os
@@ -179,7 +179,7 @@ def create_dataloaders(data_dir, input_size, batch_size):
     # Just normalization for validation
     data_transforms = {
         'train': transforms.Compose([
-            transforms.RandomRotation(45, resample=PIL.Image.BILINEAR),
+            transforms.RandomRotation(45, resample=Image.BILINEAR),
             transforms.RandomResizedCrop(input_size),
             transforms.RandomHorizontalFlip(),
             transforms.RandomVerticalFlip(),
@@ -455,7 +455,7 @@ def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_
 
     # For dev purpose ...
     os.makedirs('modules', exist_ok=True)
-    torch.save(best_model.state_dict(), 'modules/model.pt')
+    torch.save(best_model.state_dict(), 'modules/%s.pt' % model_name)
 
     # Convert to torch script for inference efficiency
     best_model = convert_to_torch_script(best_model, available_models_input_size[model_name])
@@ -481,119 +481,6 @@ def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_
         print('\nModel saved to %s\n' % file_url)
 
     return best_model
-
-
-def compute_saliency_maps(model, inputs, labels):
-    """
-    Compute a class saliency map using the model for images X and labels y.
-    :param model: Input images; Tensor of shape (N, 3, H, W).
-    :param inputs: Labels for X; LongTensor of shape (N,).
-    :param labels: A pretrained CNN that will be used to compute the saliency map.
-    :return saliency: A Tensor of shape (N, H, W) giving the saliency maps for the input images.
-    """
-
-    # Make sure the model is in "test" mode
-    model.eval()
-
-    # Make input tensor require gradient
-    inputs.requires_grad_()
-
-    # Compute the gradient of the correct class score with respect to each input image
-    # Combine scores across a batch by summing
-    sum_score = model(inputs).gather(1, labels.view(-1, 1)).squeeze().sum()
-    sum_score.backward()
-    saliency, _ = inputs.grad.abs().max(dim=1)
-
-    return saliency
-
-
-def show_saliency_maps(model, inputs, labels, images, class_names):
-    """
-    Show saliency map for trained model.
-    :param model: Trained model to make predictions.
-    :param inputs: Input data.
-    :param labels: Labels of input data.
-    :param images: Images for showing.
-    :param class_names: Name of target classes.
-    """
-
-    # Compute saliency maps
-    saliency = compute_saliency_maps(model, inputs, labels)
-    outputs = model(inputs)
-    _, preds = torch.max(outputs, 1)
-    acc_flags = preds == labels
-
-    # Convert images and saliency maps from Torch Tensor to Numpy ndarray
-    images = images.detach().numpy().transpose(0, 2, 3, 1)
-    labels = labels.detach().numpy()
-    saliency = saliency.numpy().clip(0, 1)
-
-    # Show images and saliency maps together
-    number_samples = images.shape[0]
-    for i in range(number_samples):
-        plt.subplot(2, number_samples, i + 1)
-        plt.imshow(images[i])
-        plt.axis('off')
-        plt.title(class_names[labels[i]] + '[T]' if acc_flags[i] else '[F]')
-        plt.subplot(2, number_samples, number_samples + i + 1)
-        plt.imshow(saliency[i], cmap=plt.cm.hot)
-        plt.axis('off')
-        plt.gcf().set_size_inches(12, 5)
-    plt.show()
-
-
-def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
-    """
-    Visualize model via saliency maps.
-    :param model_dir: Directory that holds saved model.
-    :param data_dir: Directory that holds input data.
-    :param num_samples: Number of samples to draw saliency maps.
-    """
-
-    # Load saved model
-    model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-    model_name = model_file_name.split('%')[0]
-    model_ft, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
-    model_ft.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
-    model_ft.eval()
-
-    # Freeze model parameters
-    for param in model_ft.parameters():
-        param.requires_grad = False
-
-    # Get dataset mean and std
-    input_size = available_models_input_size[model_name]
-    dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir, input_size)
-
-    # Resize and normalize for input, only resize for show.
-    data_transforms = {
-        'input': transforms.Compose([
-            transforms.Resize((input_size, input_size)),
-            transforms.ToTensor(),
-            transforms.Normalize(dataset_mean, dataset_std)
-        ]),
-        'show': transforms.Compose([
-            transforms.Resize((input_size, input_size)),
-            transforms.ToTensor()
-        ])
-    }
-
-    # Create datasets
-    image_datasets = {
-        x: datasets.ImageFolder(os.path.join(data_dir, 'test'), data_transforms[x])
-        for x in ['input', 'show']
-    }
-    class_names = image_datasets['input'].classes
-
-    # Create dataloaders
-    dataloaders = {
-        x: torch.utils.data.DataLoader(image_datasets[x], batch_size=num_samples, shuffle=True, num_workers=4)
-        for x in ['input', 'show']
-    }
-
-    # Show saliency maps
-    for (inputs, labels), (images, _) in zip(dataloaders['input'], dataloaders['show']):
-        show_saliency_maps(model_ft, inputs, labels, images, class_names)
 
 
 # def test_temperature_scaling():
@@ -642,11 +529,26 @@ def convert_to_torch_script(model, input_size):
     return traced_script_module
 
 
+def convert_to_onnx_model():
+    file_name = os.listdir('modules')[0]
+    model_name = file_name.split('.')[0]
+    model, _ = initialize_model(model_name, 3, True)
+    model.load_state_dict(torch.load(os.path.join('modules/', file_name)))
+    model.eval()
+
+    # An example input you would normally provide to your model's forward() method.
+    input_size = available_models_input_size[model_name]
+    example = torch.rand(1, 3, input_size, input_size)
+
+    torch.onnx.export(model, example, 'onnx/%s.onnx' % model_name)
+
+
 if __name__ == '__main__':
-    train('./data0229_dp', num_epochs=25, model_dir='models')
+    train('./data0229_dp', model_name='resnet', num_epochs=30, model_dir='models')
     # visualize_model()
     # test_temperature_scaling()
     # convert_to_torch_script()
+    # convert_to_onnx_model()
     pass
 
 
