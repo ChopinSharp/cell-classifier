@@ -12,7 +12,7 @@ class CellClassifier:
         model_file_name = os.path.split(model_file_url)[1]
         model_name, _, temperature, dataset_mean, dataset_std = model_file_name[:-3].split('%')
         script_model = torch.jit.load(model_file_url)
-        self.classes = ['aggregated', 'normal', 'segmented']
+        self.classes = ['hyperfused', 'WT', 'fragmented']
         self.model = script_model
         self.temperature = float(temperature)
         self.input_size = available_models_input_size[model_name]

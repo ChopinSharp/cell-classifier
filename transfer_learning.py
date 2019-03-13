@@ -544,7 +544,7 @@ def convert_to_onnx_model():
 
 
 if __name__ == '__main__':
-    train('./data0229_dp', model_name='resnet', num_epochs=30, model_dir='models')
+    train('./data0229_dp', model_name='squeezenet', num_epochs=30, model_dir='models')
     # visualize_model()
     # test_temperature_scaling()
     # convert_to_torch_script()
