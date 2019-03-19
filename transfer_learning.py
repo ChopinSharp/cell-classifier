@@ -10,6 +10,8 @@ import time
 import os
 import copy
 from temperature_scaling import compute_temperature
+import opencv_transforms
+import cv2
 
 
 # Device to use in training
@@ -125,6 +127,9 @@ def initialize_model(model_name, num_classes, feature_extract, verbose=False):
     return model_ft, params_to_update
 
 
+def opencv_loader(path):
+    return cv2.imread(path, cv2.IMREAD_ANYDEPTH)
+
 def estimate_dataset_mean_and_std(data_dir, input_size):
     """
     Calculate dataset mean and standard deviation.
@@ -136,11 +141,13 @@ def estimate_dataset_mean_and_std(data_dir, input_size):
 
     # Load all samples into a single dataset
     dataset = torch.utils.data.ConcatDataset([
-        datasets.ImageFolder(
+        datasets.DatasetFolder(
             os.path.join(data_dir, x),
-            transforms.Compose([
-                transforms.Resize((input_size, input_size)),
-                transforms.ToTensor()
+            opencv_loader,
+            ['jpg', 'tif'],
+            transform=transforms.Compose([
+                opencv_transforms.Resize(input_size),
+                opencv_transforms.ToTensor()
             ])
         )
         for x in ['train', 'val', 'test']
@@ -179,30 +186,33 @@ def create_dataloaders(data_dir, input_size, batch_size):
     # Just normalization for validation
     data_transforms = {
         'train': transforms.Compose([
-            transforms.RandomRotation(45, resample=Image.BILINEAR),
-            transforms.RandomResizedCrop(input_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(),
-            transforms.ToTensor(),
+            opencv_transforms.RandomRotation(45),
+            opencv_transforms.RandomResizedCrop(input_size),
+            opencv_transforms.RandomHorizontalFlip(),
+            opencv_transforms.RandomVerticalFlip(),
+            opencv_transforms.ToTensor(),
             transforms.Normalize(dataset_mean, dataset_std)
         ]),
         'val': transforms.Compose([
-            transforms.Resize((input_size, input_size)),
-            # transforms.CenterCrop(input_size),
-            transforms.ToTensor(),
+            opencv_transforms.Resize(input_size),
+            opencv_transforms.ToTensor(),
             transforms.Normalize(dataset_mean, dataset_std)
         ]),
         'test': transforms.Compose([
-            transforms.Resize((input_size, input_size)),
-            # transforms.CenterCrop(input_size),
-            transforms.ToTensor(),
+            opencv_transforms.Resize(input_size),
+            opencv_transforms.ToTensor(),
             transforms.Normalize(dataset_mean, dataset_std)
         ])
     }
 
     # Create training and validation datasets
     image_datasets = {
-        x: datasets.ImageFolder(os.path.join(data_dir, x), data_transforms[x])
+        x: datasets.DatasetFolder(
+            os.path.join(data_dir, x),
+            opencv_loader,
+            ['jpg', 'tif'],
+            transform=data_transforms[x]
+        )
         for x in ['train', 'val', 'test']
     }
 
@@ -530,7 +540,7 @@ def convert_to_torch_script(model, input_size):
 
 
 def convert_to_onnx_model():
-    file_name = os.listdir('modules')[0]
+    file_name = os.listdir('modules')[1]
     model_name = file_name.split('.')[0]
     model, _ = initialize_model(model_name, 3, True)
     model.load_state_dict(torch.load(os.path.join('modules/', file_name)))
@@ -544,12 +554,14 @@ def convert_to_onnx_model():
 
 
 if __name__ == '__main__':
-    train('./data0229_dp', model_name='squeezenet', num_epochs=30, model_dir='models')
+    train('./data0318', model_name='squeezenet', num_epochs=30, model_dir='models')
     # visualize_model()
     # test_temperature_scaling()
     # convert_to_torch_script()
     # convert_to_onnx_model()
+    # print(estimate_dataset_mean_and_std('data0318', 224))
     pass
+
 
 
 
