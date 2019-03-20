@@ -24,7 +24,7 @@ def compute_saliency_maps(model, inputs, labels):
     # Combine scores across a batch by summing
     sum_score = model(inputs).gather(1, labels.view(-1, 1)).squeeze().sum()
     sum_score.backward()
-    saliency, _ = inputs.grad.abs().max(dim=1)
+    saliency = inputs.grad.mean(dim=1)
 
     return saliency
 
@@ -49,6 +49,7 @@ def show_saliency_maps(model, inputs, labels, images, class_names):
     images = images.detach().numpy().transpose(0, 2, 3, 1)
     labels = labels.detach().numpy()
     saliency = saliency.numpy().clip(0, 1)
+    # saliency = 1.5 * (saliency - saliency.mean()) / (saliency.max() - saliency.min()) + 0.5
 
     # Show images and saliency maps together
     number_samples = images.shape[0]
@@ -64,7 +65,7 @@ def show_saliency_maps(model, inputs, labels, images, class_names):
     plt.show()
 
 
-def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
+def visualize_model(model_dir='modules', data_dir='data0229', num_samples=5):
     """
     Visualize model via saliency maps.
     :param model_dir: Directory that holds saved model.
@@ -74,7 +75,7 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
 
     # Load saved model
     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-    model_name = model_file_name.split('%')[0]
+    model_name = model_file_name.split('.')[0]
     model_ft, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
     model_ft.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
     model_ft.eval()
@@ -118,3 +119,5 @@ def visualize_model(model_dir='models', data_dir='data0229_dp', num_samples=5):
         show_saliency_maps(model_ft, inputs, labels, images, class_names)
 
 
+if __name__ == '__main__':
+    visualize_model()
