@@ -496,14 +496,14 @@ def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_
 # def test_temperature_scaling():
 #     from temperature_scaling_ref import ModelWithTemperature
 #     # Load saved model
-#     model_dir = 'models'
+#     model_dir = 'modules'
 #     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-#     model_name = model_file_name.split('%')[0]
+#     model_name = 'squeezenet'
 #     original_model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
 #     original_model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
 #     original_model.eval()
 #
-#     data_dir = 'data0229_dp'
+#     data_dir = 'data0229'
 #     batch_size = 4
 #     dataloaders, dataset_mean, dataset_std = \
 #         create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
@@ -554,7 +554,7 @@ def convert_to_onnx_model():
 
 
 if __name__ == '__main__':
-    train('./data0318', model_name='squeezenet', num_epochs=30, model_dir='models')
+    # train('data0229', model_name='squeezenet', num_epochs=30, model_dir='models')
     # visualize_model()
     # test_temperature_scaling()
     # convert_to_torch_script()

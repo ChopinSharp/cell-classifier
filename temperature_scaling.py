@@ -4,7 +4,7 @@ from torch.nn import functional as F
 
 
 def compute_temperature(model, val_loader=None, verbose=False):
-    temperature = torch.tensor(1.5, requires_grad=True)
+    temperature = torch.tensor(1.0, requires_grad=True)
 
     # Declare criterions
     nll_criterion = nn.CrossEntropyLoss()
@@ -27,23 +27,32 @@ def compute_temperature(model, val_loader=None, verbose=False):
         loss.backward()
         return loss
 
-    optimizer = optim.LBFGS([temperature], lr=0.01, max_iter=50)
+    optimizer = optim.LBFGS([temperature], lr=0.001, max_iter=70)
     optimizer.step(__update)
 
     # Stop tracking gradient for temperature parameter
     temperature.requires_grad_(False)
 
+    nll_before_scaling = nll_criterion(logits_val, labels_val).item()
+    ece_before_scaling = ece_criterion(logits_val, labels_val).item()
+    nll_after_scaling = nll_criterion(logits_val.div(temperature), labels_val).item()
+    ece_after_scaling = ece_criterion(logits_val.div(temperature), labels_val).item()
+    opt_temperature = temperature.item()
+
+    # Fallback
+    if nll_after_scaling > nll_before_scaling or ece_after_scaling > ece_before_scaling \
+            or opt_temperature < 1e-2 or opt_temperature > 100:
+        if verbose:
+            print('+ Fail to optimize temperature, falling back ...')
+        return 1.0
+
     # Print out stats if verbose flag is set
     if verbose:
-        nll_before_scaling = nll_criterion(logits_val, labels_val).item()
-        ece_before_scaling = ece_criterion(logits_val, labels_val).item()
-        nll_after_scaling = nll_criterion(logits_val.div(temperature), labels_val).item()
-        ece_after_scaling = ece_criterion(logits_val.div(temperature), labels_val).item()
-        print('+ Optimal temperature: %.3f' % temperature.item())
+        print('+ Optimal temperature: %.3f' % opt_temperature)
         print('+ Before temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_before_scaling, ece_before_scaling))
         print('+ After temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_after_scaling, ece_after_scaling))
 
-    return temperature.item()
+    return opt_temperature
 
 
 class _ECELoss(nn.Module):
