@@ -2,9 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import datasets, models, transforms
-# import numpy as np
 import matplotlib.pyplot as plt
-from PIL import Image
 import warnings
 import time
 import os
@@ -130,6 +128,7 @@ def initialize_model(model_name, num_classes, feature_extract, verbose=False):
 def opencv_loader(path):
     return cv2.imread(path, cv2.IMREAD_ANYDEPTH)
 
+
 def estimate_dataset_mean_and_std(data_dir, input_size):
     """
     Calculate dataset mean and standard deviation.
@@ -177,6 +176,8 @@ def create_dataloaders(data_dir, input_size, batch_size):
     :param input_size: Expected input size.
     :param batch_size: Batch size.
     :return dataloaders: A dictionary that holds dataloaders for training, validating and testing.
+    :return dataset_mean: Estimated mean of dataset.
+    :return dataset_std: Estimated standard deviation of dataset.
     """
 
     # Get dataset mean and std
@@ -493,33 +494,6 @@ def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_
     return best_model
 
 
-# def test_temperature_scaling():
-#     from temperature_scaling_ref import ModelWithTemperature
-#     # Load saved model
-#     model_dir = 'modules'
-#     model_file_name = os.listdir(model_dir)[0]  # load first model file by default
-#     model_name = 'squeezenet'
-#     original_model, _ = initialize_model(model_name, num_classes=3, feature_extract=True)
-#     original_model.load_state_dict(torch.load(os.path.join(model_dir, model_file_name)))
-#     original_model.eval()
-#
-#     data_dir = 'data0229'
-#     batch_size = 4
-#     dataloaders, dataset_mean, dataset_std = \
-#         create_dataloaders(data_dir, available_models_input_size[model_name], batch_size)
-#     valid_loader = dataloaders['val']
-#     temperature = compute_temperature(original_model, valid_loader, verbose=True)
-#     print('*' * 20)
-#     scaled_model = ModelWithTemperature(original_model)
-#     scaled_model.set_temperature(valid_loader)
-#
-#     test_loader = dataloaders['test']
-#     acc, conf = test_model(original_model, test_loader)
-#     print('Original model: acc=%.4f, avg_conf=%.4f'% (acc, conf))
-#     acc, conf = test_model(scaled_model, test_loader)
-#     print('Scaled model: acc=%.4f, avg_conf=%.4f' % (acc, conf))
-
-
 def convert_to_torch_script(model, input_size):
     """
     Convert torch.nn.Module to torch.jit.ScriptModule via tracing.
@@ -539,22 +513,8 @@ def convert_to_torch_script(model, input_size):
     return traced_script_module
 
 
-def convert_to_onnx_model():
-    file_name = os.listdir('modules')[1]
-    model_name = file_name.split('.')[0]
-    model, _ = initialize_model(model_name, 3, True)
-    model.load_state_dict(torch.load(os.path.join('modules/', file_name)))
-    model.eval()
-
-    # An example input you would normally provide to your model's forward() method.
-    input_size = available_models_input_size[model_name]
-    example = torch.rand(1, 3, input_size, input_size)
-
-    torch.onnx.export(model, example, 'onnx/%s.onnx' % model_name)
-
-
 if __name__ == '__main__':
-    train('data_mixed', model_name='squeezenet', num_epochs=30, model_dir='models')
+    train('data0229', model_name='squeezenet', num_epochs=30, model_dir='models')
     # visualize_model()
     # test_temperature_scaling()
     # convert_to_torch_script()
