@@ -514,12 +514,7 @@ def convert_to_torch_script(model, input_size):
 
 
 if __name__ == '__main__':
-    train('data0229', model_name='squeezenet', num_epochs=30, model_dir='models')
-    # visualize_model()
-    # test_temperature_scaling()
-    # convert_to_torch_script()
-    # convert_to_onnx_model()
-    # print(estimate_dataset_mean_and_std('data0318', 224))
+    train('data0229', model_name='squeezenet', num_epochs=25, model_dir='models')
     pass
 
 

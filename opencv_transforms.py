@@ -53,7 +53,7 @@ class RandomResizedCrop:
     This is popularly used to train the Inception networks.
     """
 
-    def __init__(self, size, scale=(0.7, 1.0), ratio=(5. / 6., 6. / 5.), interpolation=cv2.INTER_LINEAR):
+    def __init__(self, size, scale=(0.1, 1.0), ratio=(5. / 6., 6. / 5.), interpolation=cv2.INTER_LINEAR):
         """
         :param size: expected output size of each edge
         :param scale: range of size of the origin size cropped
