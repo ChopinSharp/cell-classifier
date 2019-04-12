@@ -3,6 +3,7 @@ import random
 import math
 import numpy as np
 import torch
+import torchvision.transforms.functional as F
 
 
 class ToNumpy:
@@ -207,6 +208,26 @@ class ToTensor:
         return img.div(max_value)
 
 
+class ExtResize:
+
+    def __init__(self, size, interpolation=cv2.INTER_LINEAR):
+        """
+        :param size: Of type int. Expected size.
+        :param interpolation: Sampling method to use.
+        """
+        self.size = size
+        self.interpolation = interpolation
+
+    def __call__(self, img, lbl):
+        """
+        :param img: Of type numpy.ndarray. Image to be scaled.
+        :return: Rescaled image.
+        """
+        resized_img = cv2.resize(img, (self.size, self.size), interpolation=self.interpolation)
+        resized_lbl = cv2.resize(lbl, (self.size, self.size), interpolation=cv2.INTER_NEAREST)
+        return resized_img, resized_lbl
+
+
 class ExtRandomResizedCrop:
     """
     Crop the given PIL Image to random size and aspect ratio.
@@ -346,6 +367,64 @@ class ExtRandomRotation:
         rotated_lbl = cv2.warpAffine(lbl, m, (cols, rows), flags=cv2.INTER_NEAREST)
         return rotated_img, rotated_lbl
 
+
+class ExtToTensor:
+    """
+    Convert a numpy array to 3-dimensional torch tensor.
+    """
+
+    def __call__(self, img_array, lbl):
+        if img_array.dtype == np.uint8:
+            max_value = 2 ** 8
+        elif img_array.dtype == np.uint16:
+            max_value = 2 ** 16
+        else:
+            assert False, 'In opencv_transforms.ToTensor: unsupported dtype: ' + str(img_array.dtype)
+
+        # Expand grayscale image to 3-dim array
+        if len(img_array.shape) == 3:
+            channels = img_array.shape[2]
+            assert channels == 3, 'Images with %d channels are not supported' % channels
+            img_expanded = img_array
+        else:
+            img_expanded = np.zeros((*img_array.shape, 3), dtype=img_array.dtype)
+            img_expanded[:, :, :] = img_array[:, :, np.newaxis]
+
+        img = torch.from_numpy(img_expanded.transpose((2, 0, 1)).astype(np.float32, casting='safe')).div(max_value)
+        lbl = torch.from_numpy(np.ascontiguousarray(lbl)).type(dtype=torch.long)
+
+        return img, lbl
+
+
+class ExtNormalize(object):
+    """Normalize a tensor image with mean and standard deviation.
+    Given mean: ``(M1,...,Mn)`` and std: ``(S1,..,Sn)`` for ``n`` channels, this transform
+    will normalize each channel of the input ``torch.*Tensor`` i.e.
+    ``input[channel] = (input[channel] - mean[channel]) / std[channel]``
+    .. note::
+        This transform acts out of place, i.e., it does not mutates the input tensor.
+    Args:
+        mean (sequence): Sequence of means for each channel.
+        std (sequence): Sequence of standard deviations for each channel.
+    """
+
+    def __init__(self, mean, std):
+        self.mean = mean
+        self.std = std
+
+    def __call__(self, img, lbl):
+        """
+        Args:
+            tensor (Tensor): Tensor image of size (C, H, W) to be normalized.
+        Returns:
+            Tensor: Normalized Tensor image.
+        """
+        return F.normalize(img, self.mean, self.std), lbl
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+
+
 class ExtCompose:
 
     def __init__(self, transforms):
@@ -355,6 +434,7 @@ class ExtCompose:
         for t in self.transforms:
             img, lbl = t(img, lbl)
         return img, lbl
+
 
 
 if __name__ == '__main__':
