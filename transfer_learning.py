@@ -164,7 +164,7 @@ def estimate_dataset_mean_and_std(data_dir, input_size):
     dataset_mean /= num_batches
     for inputs, _ in iter(loader):
         dataset_std += torch.mean((inputs - dataset_mean.reshape((1, 3, 1, 1))) ** 2, dim=(0, 2, 3))
-    dataset_std = torch.sqrt(dataset_std / num_batches)
+    dataset_std = torch.sqrt(dataset_std.div(num_batches))
 
     return dataset_mean.tolist(), dataset_std.tolist()
 
@@ -293,10 +293,10 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs, is_incepti
                 # Record statistics
                 _, preds = torch.max(outputs, 1)
                 running_loss += loss.item() * inputs.size(0)
-                running_corrects += torch.sum(preds == labels.data)
+                running_corrects += torch.sum(preds == labels.data).item()
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
+            epoch_acc = running_corrects / len(dataloaders[phase].dataset)
 
             if verbose:
                 print('+ %s Loss: %.4f Acc: %.4f' % (phase, epoch_loss, epoch_acc))
@@ -347,10 +347,10 @@ def test_model(model, dataloader, is_inception=False):
             probs = nn.functional.softmax(outputs, dim=1)
 
         # statistics
-        running_corrects += torch.sum(preds == labels.data)
-        sum_conf += probs[torch.arange(probs.size()[0]), preds].sum()
+        running_corrects += torch.sum(preds == labels.data).item()
+        sum_conf += probs[torch.arange(probs.size()[0]), preds].sum().item()
 
-    test_acc = running_corrects.double() / len(dataloader.dataset)
+    test_acc = running_corrects / len(dataloader.dataset)
     avg_conf = sum_conf / len(dataloader.dataset)
 
     return test_acc, avg_conf
