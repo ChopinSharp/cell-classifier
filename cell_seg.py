@@ -84,24 +84,47 @@ def opencv_loader(path):
 
 
 class SegImgFolder(datasets.DatasetFolder):
-    def __init__(self, root):
+    def __init__(self, root, linked_transforms=None):
         super(SegImgFolder, self).__init__(root, opencv_loader, ['.jpg', '.tif'])
+        self.linked_transforms = linked_transforms
 
     def __getitem__(self, index):
-        sample, target = super(SegImgFolder, self).__getitem__(index)
-        sample = opencv_transforms.Resize(224)(sample)
-        _, mask = cv2.threshold(sample, 0, target + 1, cv2.THRESH_OTSU | cv2.THRESH_BINARY)
+        img, lbl = super(SegImgFolder, self).__getitem__(index)
+        img = opencv_transforms.Resize(224)(img)
+        _, lbl = cv2.threshold(img, 0, lbl + 1, cv2.THRESH_OTSU | cv2.THRESH_BINARY)
 
-        return opencv_transforms.ToTensor()(sample), torch.from_numpy(mask)
+        if self.linked_transforms is not None:
+            img, lbl = self.linked_transforms(img, lbl)
+
+        img = opencv_transforms.ToTensor()(img)
+        lbl = torch.from_numpy(np.ascontiguousarray(lbl))
+        return img, lbl
 
 
 def visualize_dataset(root='data0229/val'):
-    dataset = SegImgFolder(root)
+    dataset = SegImgFolder(
+        root,
+        linked_transforms=opencv_transforms.ExtCompose([
+            # opencv_transforms.ExtRandomHorizontalFlip(0.99),
+            # opencv_transforms.ExtRandomVerticalFlip(0.99),
+            # opencv_transforms.ExtRandomRotation(90),
+            opencv_transforms.ExtRandomResizedCrop(200)
+        ])
+    )
     loader = torch.utils.data.DataLoader(dataset, batch_size=1)
+    palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
+    count = 0
     for sample, target in loader:
         img = (255 * sample.detach().numpy()[0].transpose((1, 2, 0))).astype(np.uint8)
+        mask = palette[target.detach().numpy()[0]]
+        plt.subplot(121)
         plt.imshow(img)
+        plt.subplot(122)
+        plt.imshow(mask)
         plt.show()
+        count  += 1
+        if count == 20:
+            break
 
 
 
