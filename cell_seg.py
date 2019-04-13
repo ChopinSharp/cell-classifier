@@ -49,7 +49,7 @@ class Seg(models.SqueezeNet):
             super(Seg, self).__init__()
 
         # self.state_dict().update(filter(lambda item: item[0] in self.state_dict(), standard_model.state_dict()))
-        self.load_state_dict(torch.load('/home/meng5th/.torch/models/squeezenet1_0-a815701f.pth'))
+        self.load_state_dict(torch.load('/home/mwb/.torch/models/squeezenet1_0-a815701f.pth'))
 
         for param in self.parameters():
             param.requires_grad = False
@@ -127,6 +127,7 @@ class IOUMetric:
     def __call__(self, gt, lbl):
         gt = gt.detach().numpy()
         lbl = lbl.detach().numpy()
+        #print(gt.shape, lbl.shape)
         IOU_0 = self.calculate_IOU(gt, lbl, 0)
         IOU_1 = self.calculate_IOU(gt, lbl, 1)
         IOU_2 = self.calculate_IOU(gt, lbl, 2)
@@ -288,8 +289,10 @@ def train(num_epochs, verbose=True):
 
                 # Record statistics
                 running_loss += loss.item() * inputs.size(0)
-                running_IoU += metric(outputs, labels)
-
+                preds = outputs.argmax(dim=1)
+                # print(outputs.size(), preds.size())
+                IoU_0, IoU_1, IoU_2, IoU_3, IoU_avg = metric(labels, preds)
+                running_IoU += IoU_avg * inputs.size(0)
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
             epoch_IoU = running_IoU / len(dataloaders[phase].dataset)
@@ -317,6 +320,7 @@ def train(num_epochs, verbose=True):
 if __name__ == '__main__':
 
 
-    train(30)
+    model = train(30)
+    torch.save(model.state_dict(), 'models/seg.pt')
 
     print('done')
