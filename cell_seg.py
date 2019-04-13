@@ -116,6 +116,25 @@ class SegImgFolder(datasets.DatasetFolder):
         return img, lbl
 
 
+class IOUMetric:
+    def calculate_IOU(self, gt, lbl, cls):
+        or_area = np.logical_or(gt == cls, lbl == cls).sum()
+        if or_area == 0:
+            return 1.
+        return np.logical_and(gt == cls, lbl == cls).sum() / or_area
+
+
+    def __call__(self, gt, lbl):
+        gt = gt.detach().numpy()
+        lbl = lbl.detach().numpy()
+        IOU_0 = self.calculate_IOU(gt, lbl, 0)
+        IOU_1 = self.calculate_IOU(gt, lbl, 1)
+        IOU_2 = self.calculate_IOU(gt, lbl, 2)
+        IOU_3 = self.calculate_IOU(gt, lbl, 3)
+        IOU_avg = (IOU_0 + IOU_1 + IOU_2 + IOU_3) / 4
+        return IOU_0, IOU_1, IOU_2, IOU_3, IOU_avg
+
+
 def visualize_dataset(root='data0229/val'):
     dataset = SegImgFolder(
         root,
@@ -215,6 +234,7 @@ def train(num_epochs, verbose=True):
 
     # Set up criterion and optimizer
     criterion = nn.CrossEntropyLoss()
+    metric = IOUMetric()
     optimizer = optim.Adam(
         model.decoder.parameters(),
         lr=1e-5,
@@ -228,7 +248,10 @@ def train(num_epochs, verbose=True):
     dataloaders, dataset_mean, dataset_std = create_dataloaders('data0229', 4)
 
     # Main train loop
-
+    val_IoU_history = []
+    loss_history = []
+    best_model_wts = copy.deepcopy(model.state_dict())
+    best_val_IoU = 0.0
     # Train for some epochs
     for epoch in range(num_epochs):
         if verbose:
@@ -243,6 +266,7 @@ def train(num_epochs, verbose=True):
                 model.eval()  # Set model to evaluate mode
 
             running_loss = 0.0
+            running_IoU = 0.0
 
             # Iterate over data.
             for inputs, labels in dataloaders[phase]:
@@ -264,33 +288,34 @@ def train(num_epochs, verbose=True):
 
                 # Record statistics
                 running_loss += loss.item() * inputs.size(0)
+                running_IoU += metric(outputs, labels)
+
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
+            epoch_IoU = running_IoU / len(dataloaders[phase].dataset)
+            if verbose:
+                print('+ %s Loss: %.4f IoU: %.4f' % (phase, epoch_loss, epoch_IoU))
 
-            # if verbose:
-            #     print('+ %s Loss: %.4f Acc: %.4f' % (phase, epoch_loss, epoch_acc))
-
-            # # Deep copy the best model so far
-            # if phase == 'val' and epoch_acc > best_val_acc:
-            #     best_val_acc = epoch_acc
-            #     best_model_wts = copy.deepcopy(model.state_dict())
-            # if phase == 'val':
-            #     val_acc_history.append(epoch_acc)
-            #     loss_history.append(epoch_loss)
+            # Deep copy the best model so far
+            if phase == 'val' and epoch_IoU > best_val_IoU:
+                best_val_IoU = epoch_IoU
+                best_model_wts = copy.deepcopy(model.state_dict())
+            if phase == 'val':
+                val_IoU_history.append(epoch_IoU)
+                loss_history.append(epoch_loss)
 
     # Print out best val acc
     # time_elapsed = time.time() - since
     # print('\nTraining complete in %.0fm %.0fs' % (time_elapsed // 60, time_elapsed % 60))
 
     # Load best model weights
-    # model.load_state_dict(best_model_wts)
+    model.load_state_dict(best_model_wts)
 
     return model
 
 
 if __name__ == '__main__':
 
-    # visualize_dataset()
 
     train(30)
 
