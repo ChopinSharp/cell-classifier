@@ -304,6 +304,7 @@ class ExtRandomResizedCrop:
         scaled_lbl = cv2.resize(lbl[i:i+h, j:j+w], self.size, interpolation=cv2.INTER_NEAREST)
         return scaled_img, scaled_lbl
 
+
 class ExtRandomHorizontalFlip:
     """
     Horizontally flip the given PIL Image randomly with a given probability.
@@ -436,7 +437,6 @@ class ExtCompose:
         return img, lbl
 
 
-
 if __name__ == '__main__':
     """
     Test module.
@@ -511,5 +511,32 @@ if __name__ == '__main__':
         img_tensor = ToTensor()(img_array)
         print('Tensor of shape:', img_tensor.size(), 'type:', img_tensor.dtype)
         cv2.destroyAllWindows()
+
+    def test_ext(root='../datasets/data0229/val'):
+        from main.cell_segmentation import SegImgFolder
+        import matplotlib.pyplot as plt
+        dataset = SegImgFolder(
+            root,
+            linked_transforms=ExtCompose([
+                # opencv_transforms.ExtRandomHorizontalFlip(0.99),
+                # opencv_transforms.ExtRandomVerticalFlip(0.99),
+                # opencv_transforms.ExtRandomRotation(90),
+                ExtRandomResizedCrop(200)
+            ])
+        )
+        loader = torch.utils.data.DataLoader(dataset, batch_size=1)
+        palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
+        count = 0
+        for sample, target in loader:
+            img = (255 * sample.detach().numpy()[0].transpose((1, 2, 0))).astype(np.uint8)
+            mask = palette[target.detach().numpy()[0]]
+            plt.subplot(121)
+            plt.imshow(img)
+            plt.subplot(122)
+            plt.imshow(mask)
+            plt.show()
+            count += 1
+            if count == 20:
+                break
 
     test()

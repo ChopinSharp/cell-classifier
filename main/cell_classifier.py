@@ -15,26 +15,31 @@ available_models_input_size = {
 
 
 def set_parameter_requires_grad(model, feature_extract):
-    """
-    Set the require_grads attribute of model's parameters according to feature_extract flag.
-    :param model: Model to operate on.
-    :param feature_extract: Feature extracting or finetuning.
-    """
+    """Set the require_grads attribute of model's parameters according to feature_extract flag.
 
+    Args:
+        model: Model to operate on.
+        feature_extract: Feature extracting or finetuning.
+
+    """
     if feature_extract:
         for param in model.parameters():
             param.requires_grad = False
 
 
 def initialize_model(model_name, num_classes, feature_extract, verbose=False):
-    """
-    Initialize required model and set it up for feature extracting or finetuning.
-    :param model_name: Type of model to initialize.
-    :param num_classes: Total number of target classes.
-    :param feature_extract: Feature extracting or finetuning.
-    :param verbose: Print model info in the end or not.
-    :return model_ft: Initialized model.
-    :return params_to_update: List of parameters to be updated during training.
+    """Initialize required model and set it up for feature extracting or finetuning.
+
+    Args:
+        model_name: Type of model to initialize.
+        num_classes: Total number of target classes.
+        feature_extract: Feature extracting or finetuning.
+        verbose: Print model info in the end or not.
+
+    Returns:
+        model_ft: Initialized model.
+        params_to_update: List of parameters to be updated during training.
+
     """
 
     model_ft = None

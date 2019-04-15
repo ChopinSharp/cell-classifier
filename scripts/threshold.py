@@ -2,7 +2,7 @@ import cv2
 import os
 import matplotlib.pyplot as plt
 
-data_dir = 'data/WT'
+data_dir = '../datasets/data0229_svm/WT'
 
 for name in os.listdir(data_dir):
     path = os.path.join(data_dir, name)

@@ -68,21 +68,24 @@ def create_dataloaders(data_dir, input_size, batch_size):
 
 
 def train_model(model, dataloaders, criterion, optimizer, num_epochs, is_inception=False, verbose=True):
-    """
-    Train and validate model with given dataloaders, loss and optimizer for some number of epochs.
+    """Train and validate model with given dataloaders, loss and optimizer for some number of epochs.
     Log the training dynamics and return the model with best val acc.
-    :param model: Initialized model to be trained.
-    :param dataloaders: Dataloaders to train and validate on.
-    :param criterion: Loss function.
-    :param optimizer: Optimizer to use with fixed hyper-parameters.
-    :param num_epochs: Number of epochs to train.
-    :param is_inception: Using Inception model or not.
-    :param verbose: Print training info every epoch or not.
-    :return model: Model with best val acc. Changed inplace, actually unnecessary to return.
-    :return val_acc_history: History of val acc over epochs.
-    :return loss_history: History of loss over epochs
-    """
 
+    Args:
+        model: Initialized model to be trained.
+        dataloaders: Dataloaders to train and validate on.
+        criterion: Loss function.
+        optimizer: Optimizer to use with fixed hyper-parameters.
+        num_epochs: Number of epochs to train.
+        is_inception: Using Inception model or not.
+        verbose: Print training info every epoch or not.
+
+    Returns:
+        model: Model with best val acc. Changed inplace, actually unnecessary to return.
+        val_acc_history: History of val acc over epochs.
+        loss_history: History of loss over epochs
+
+    """
     # Record training stats
     # since = time.time()
     val_acc_history = []
@@ -161,15 +164,18 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs, is_incepti
 
 
 def test_model(model, dataloader, is_inception=False):
-    """
-    Test model.
-    :param model: Model to test.
-    :param dataloader: Dataloader of test set.
-    :param is_inception: Using Inception model or not.
-    :return test_acc: Test accuracy.
-    :return avg_conf: Average confidence of the prediction.
-    """
+    """Test model.
 
+    Args:
+        model: Model to test.
+        dataloader: Dataloader of test set.
+        is_inception: Using Inception model or not.
+
+    Returns:
+        test_acc: Test accuracy.
+        avg_conf: Average confidence of the prediction.
+
+    """
     running_corrects = 0
     sum_conf = 0.0
 
@@ -197,25 +203,27 @@ def test_model(model, dataloader, is_inception=False):
     return test_acc, avg_conf
 
 
-def train_and_cross_validate(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_classes=3,
-                             batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,)):
-    """
-    Train and validate chosen model with set(s) of hyper-parameters,
-    plot the training process, save the model if required, and print out
-    the test acc(s) in the end.
-    :param data_dir: Top level data directory.
-    :param model_name: Model to use.
-    :param model_dir: Directory to save trained model.
-    :param plot_dir: Directory to save training plots.
-    :param num_classes: Total number of target classes.
-    :param batch_size: Batch size for training.
-    :param num_epochs: Number of epochs to train.
-    :param feature_extract: Feature extracting or finetuning.
-    :param learning_rates: Candidates of learning rates to use.
-    :param weight_decays: Candidates of weight decays to use.
-    :return: best model during training.
-    """
+def main(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_classes=3,
+         batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,)):
+    """Train and validate chosen model with set(s) of hyper-parameters, plot the training process,
+    save the model if required, and print out the test acc(s) in the end.
 
+    Args:
+        data_dir: Top level data directory.
+        model_name: Model to use.
+        model_dir: Directory to save trained model.
+        plot_dir: Directory to save training plots.
+        num_classes: Total number of target classes.
+        batch_size: Batch size for training.
+        num_epochs: Number of epochs to train.
+        feature_extract: Feature extracting or finetuning.
+        learning_rates: Candidates of learning rates to use.
+        weight_decays: Candidates of weight decays to use.
+
+    Returns:
+        best model during training.
+
+    """
     # Make sure model type is valid
     assert model_name in available_models_input_size.keys(), 'Unsupported model type ' + model_name
     print('Using %s ...\n' % model_name)
@@ -307,7 +315,7 @@ def train_and_cross_validate(data_dir, model_name='squeezenet', model_dir=None, 
 
     # For dev purpose ...
     os.makedirs('modules', exist_ok=True)
-    torch.save(best_model.state_dict(), 'modules/%s.pt' % model_name)
+    torch.save(best_model.state_dict(), '../results/saved_models/%s.pt' % model_name)
 
     # Convert to torch script for inference efficiency
     best_model = convert_to_torch_script(best_model, available_models_input_size[model_name])
@@ -336,13 +344,16 @@ def train_and_cross_validate(data_dir, model_name='squeezenet', model_dir=None, 
 
 
 def convert_to_torch_script(model, input_size):
-    """
-    Convert torch.nn.Module to torch.jit.ScriptModule via tracing.
-    :param model: trained torch.nn.Module instance.
-    :param input_size: input size of the model.
-    :return: traced torch.jit.ScriptModule instance.
-    """
+    """Convert torch.nn.Module to torch.jit.ScriptModule via tracing.
 
+    Args:
+        model: trained torch.nn.Module instance.
+        input_size: input size of the model.
+
+    Returns:
+        traced torch.jit.ScriptModule instance.
+
+    """
     model.eval()
 
     # An example input you would normally provide to your model's forward() method.
@@ -355,4 +366,4 @@ def convert_to_torch_script(model, input_size):
 
 
 if __name__ == '__main__':
-    train_and_cross_validate('data0229', model_name='squeezenet', num_epochs=25, model_dir='models')
+    main('../datasets/data0229', model_name='squeezenet', num_epochs=25, model_dir='../results/saved_scripts')

@@ -1,26 +1,22 @@
+from utils import *
 import torch
 import torch.nn as nn
 from torchvision import models, datasets
 import warnings
 import torch.optim as optim
-from main.cell_classifier import estimate_dataset_mean_and_std
-from utils import opencv_transforms
 import os
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
+import time
 
 
-# Device to use in training
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-
-def initialize_weights(*models):
-    for model in models:
+def initialize_weights(*model_list):
+    for model in model_list:
         for module in model.modules():
             if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
-                nn.init.kaiming_normal(module.weight)
+                nn.init.xavier_normal_(module.weight)
                 if module.bias is not None:
                     module.bias.data.zero_()
             elif isinstance(module, nn.BatchNorm2d):
@@ -42,46 +38,27 @@ class _DecoderBlock(nn.Module):
         return self.block(x)
 
 
-class Seg(models.SqueezeNet):
+class UnetSqueeze(models.SqueezeNet):
     def __init__(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            super(Seg, self).__init__()
+            super(UnetSqueeze, self).__init__()
 
         # self.state_dict().update(filter(lambda item: item[0] in self.state_dict(), standard_model.state_dict()))
-        self.load_state_dict(torch.load('/home/mwb/.torch/models/squeezenet1_0-a815701f.pth'))
+        self.load_state_dict(torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth')))
 
         for param in self.parameters():
             param.requires_grad = False
 
         del self.classifier
 
-        self.decoder = nn.ModuleList([              # 512 * 13
-            nn.ConvTranspose2d(512, 256, 3, 2),     # 256 * 27 + 256 * 27 [7]
+        self.decoder = nn.ModuleList([
+            nn.ConvTranspose2d(512, 256, 3, 2),
             _DecoderBlock(512, 256, 128, 2),
             _DecoderBlock(256, 128, 64, 3),
             _DecoderBlock(160, 80, 40, 8),
-            # nn.Sequential([
-            #     nn.Conv2d(512, 256, 3, 1, 1),           # 256 * 27
-            #     nn.BatchNorm2d(256),
-            #     nn.ReLU(inplace=True),
-            #     nn.ConvTranspose2d(256, 128, 2, 2)     # 128 * 54 + 128 * 54 [4]
-            # ]),
-            # nn.Sequential([
-            #     nn.Conv2d(256, 128, 3, 1, 1),           # 128 * 54
-            #     nn.BatchNorm2d(128),
-            #     nn.ReLU(inplace=True),
-            #     nn.ConvTranspose2d(128, 64, 3, 2)      # 64 * 109 + 96 * 109 [1]
-            # ]),
-            # nn.Sequential([
-            #     nn.Conv2d(160, 80, 3, 1, 1),            # 80 * 109
-            #     nn.BatchNorm2d(80),
-            #     nn.ReLU(inplace=True),
-            #     nn.ConvTranspose2d(80, 40, 8, 2)       # 40 * 224
-            # ]),
-            nn.Conv2d(40, 4, 3, 1, 1)                   # 1 * 224
+            nn.Conv2d(40, 4, 3, 1, 1)
         ])
-
 
     def forward(self, x):
         activations = []
@@ -97,8 +74,88 @@ class Seg(models.SqueezeNet):
         return x
 
 
-def opencv_loader(path):
-    return cv2.imread(path, cv2.IMREAD_ANYDEPTH)
+# Copied from https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
+def make_layers(cfg, batch_norm=False):
+    layers = []
+    in_channels = 3
+    for v in cfg:
+        if v == 'M':
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+        else:
+            conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
+            if batch_norm:
+                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+            else:
+                layers += [conv2d, nn.ReLU(inplace=True)]
+            in_channels = v
+    return nn.Sequential(*layers)
+
+
+vgg_config = {
+    'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+    'B': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+    'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
+    'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
+}
+
+
+class _DecoderBasicBlock(nn.Module):
+    def __init__(self, in_channels, mid_channels, out_channels):
+        super(_DecoderBasicBlock, self).__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, mid_channels, 3, 1, 1),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(mid_channels, mid_channels, 3, 1, 1),
+            nn.BatchNorm2d(mid_channels),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(mid_channels, out_channels, 2, 2)
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
+class UnetVgg(nn.Module):
+    def __init__(self, pretrained=True):
+        super(UnetVgg, self).__init__()
+
+        # Construct and load vgg feature extracter
+        self.features = make_layers(vgg_config['A'], batch_norm=True)
+        if pretrained:
+            vgg11_bn_pretrained = torch.load(os.path.expanduser('~/.torch/models/vgg11_bn-6002323d.pth'))
+            self.features.state_dict().update({
+                k: v for k, v in vgg11_bn_pretrained.items() if k.split('.')[0] == 'features'
+            })
+
+        # Construct decoder
+        self.decoder = nn.ModuleList([
+            _DecoderBasicBlock(512, 1024, 512),
+            _DecoderBasicBlock(1024, 512, 512),
+            _DecoderBasicBlock(1024, 512, 256),
+            _DecoderBasicBlock(512, 256, 128),
+            _DecoderBasicBlock(256, 128, 64),
+            nn.Conv2d(128, 64, 3, 1, 1),
+            nn.Conv2d(64, 64, 3, 1, 1),
+            nn.Conv2d(64, 4, 3, 1, 1)
+        ])
+
+    def forward(self, x):
+        features = []
+        for layer in self.features:
+            x = layer(x)
+            features.append(x)
+
+        x = self.decoder[0](x)
+        x = self.decoder[1](torch.cat((x, features[27]), dim=1))
+        x = self.decoder[2](torch.cat((x, features[20]), dim=1))
+        x = self.decoder[3](torch.cat((x, features[13]), dim=1))
+        x = self.decoder[4](torch.cat((x, features[6]), dim=1))
+        x = self.decoder[5](torch.cat((x, features[2]), dim=1))
+        x = self.decoder[6](x)
+        x = self.decoder[7](x)
+
+        return x
 
 
 class SegImgFolder(datasets.DatasetFolder):
@@ -117,26 +174,26 @@ class SegImgFolder(datasets.DatasetFolder):
 
 
 class IOUMetric:
-    def calculate_IOU(self, gt, lbl, cls):
+    @staticmethod
+    def calculate_iou(gt, lbl, cls):
         or_area = np.logical_or(gt == cls, lbl == cls).sum()
         if or_area == 0:
             return 1.
         return np.logical_and(gt == cls, lbl == cls).sum() / or_area
 
-
     def __call__(self, gt, lbl):
         gt = gt.detach().numpy()
         lbl = lbl.detach().numpy()
-        #print(gt.shape, lbl.shape)
-        IOU_0 = self.calculate_IOU(gt, lbl, 0)
-        IOU_1 = self.calculate_IOU(gt, lbl, 1)
-        IOU_2 = self.calculate_IOU(gt, lbl, 2)
-        IOU_3 = self.calculate_IOU(gt, lbl, 3)
-        IOU_avg = (IOU_0 + IOU_1 + IOU_2 + IOU_3) / 4
-        return IOU_0, IOU_1, IOU_2, IOU_3, IOU_avg
+        # print(gt.shape, lbl.shape)
+        iou_0 = self.calculate_iou(gt, lbl, 0)
+        iou_1 = self.calculate_iou(gt, lbl, 1)
+        iou_2 = self.calculate_iou(gt, lbl, 2)
+        iou_3 = self.calculate_iou(gt, lbl, 3)
+        iou_avg = (iou_0 + iou_1 + iou_2 + iou_3) / 4
+        return iou_0, iou_1, iou_2, iou_3, iou_avg
 
 
-def visualize_dataset(root='data0229/val'):
+def visualize_result(root='data0229/val'):
     dataset = SegImgFolder(
         root,
         linked_transforms=opencv_transforms.ExtCompose([
@@ -157,36 +214,35 @@ def visualize_dataset(root='data0229/val'):
         plt.subplot(122)
         plt.imshow(mask)
         plt.show()
-        count  += 1
+        count += 1
         if count == 20:
             break
 
 
-
 def create_dataloaders(data_dir, batch_size):
-    """
-    Create datasets and dataloaders.
-    :param data_dir: Top directory of data.
-    :param batch_size: Batch size.
-    :return dataloaders: A dictionary that holds dataloaders for training, validating and testing.
-    :return dataset_mean: Estimated mean of dataset.
-    :return dataset_std: Estimated standard deviation of dataset.
-    """
+    """Create datasets and dataloaders.
 
+    Args:
+        data_dir: Top directory of data.
+        batch_size: Batch size.
+
+    Returns:
+        dataloaders: A dictionary that holds dataloaders for training, validating and testing.
+        dataset_mean: Estimated mean of dataset.
+        dataset_std: Estimated standard deviation of dataset.
+
+    """
     input_size = 224
 
     # Get dataset mean and std
     dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir, input_size)
-
-
-    print("i'm here")
 
     # Data augmentation and normalization for training
     # Just normalization for validation
     data_transforms = {
         'train': opencv_transforms.ExtCompose([
             opencv_transforms.ExtRandomRotation(45),
-            opencv_transforms.ExtRandomResizedCrop(input_size),
+            opencv_transforms.ExtRandomResizedCrop(input_size, (0.8, 1.0)),
             opencv_transforms.ExtRandomHorizontalFlip(),
             opencv_transforms.ExtRandomVerticalFlip(),
             opencv_transforms.ExtToTensor(),
@@ -222,15 +278,12 @@ def create_dataloaders(data_dir, batch_size):
     return dataloaders, dataset_mean, dataset_std
 
 
-
-
 def train(num_epochs, verbose=True):
-    model = Seg()
 
-    # Initialization
-    # for param in model.decoder.parameters():
-    #     nn.init.xavier_normal_(param)
+    model = UnetVgg()
 
+    for param in model.features.parameters():
+        param.requires_grad = False
     initialize_weights(model.decoder)
 
     # Set up criterion and optimizer
@@ -238,7 +291,7 @@ def train(num_epochs, verbose=True):
     metric = IOUMetric()
     optimizer = optim.Adam(
         model.decoder.parameters(),
-        lr=1e-5,
+        lr=1e-3,
         betas=(0.9, 0.999),
         eps=1e-08,
         weight_decay=1e-4,
@@ -246,13 +299,14 @@ def train(num_epochs, verbose=True):
     )
 
     # Prepare dataset
-    dataloaders, dataset_mean, dataset_std = create_dataloaders('data0229', 4)
+    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229', 4)
 
     # Main train loop
-    val_IoU_history = []
+    val_iou_history = []
     loss_history = []
     best_model_wts = copy.deepcopy(model.state_dict())
-    best_val_IoU = 0.0
+    best_val_iou = 0.0
+    since = time.time()
     # Train for some epochs
     for epoch in range(num_epochs):
         if verbose:
@@ -267,7 +321,7 @@ def train(num_epochs, verbose=True):
                 model.eval()  # Set model to evaluate mode
 
             running_loss = 0.0
-            running_IoU = 0.0
+            running_iou = 0.0
 
             # Iterate over data.
             for inputs, labels in dataloaders[phase]:
@@ -291,25 +345,25 @@ def train(num_epochs, verbose=True):
                 running_loss += loss.item() * inputs.size(0)
                 preds = outputs.argmax(dim=1)
                 # print(outputs.size(), preds.size())
-                IoU_0, IoU_1, IoU_2, IoU_3, IoU_avg = metric(labels, preds)
-                running_IoU += IoU_avg * inputs.size(0)
+                iou_0, iou_1, iou_2, iou_3, iou_avg = metric(labels, preds)
+                running_iou += iou_avg * inputs.size(0)
 
             epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_IoU = running_IoU / len(dataloaders[phase].dataset)
+            epoch_iou = running_iou / len(dataloaders[phase].dataset)
             if verbose:
-                print('+ %s Loss: %.4f IoU: %.4f' % (phase, epoch_loss, epoch_IoU))
+                print('+ %s Loss: %.4f IoU: %.4f' % (phase, epoch_loss, epoch_iou))
 
             # Deep copy the best model so far
-            if phase == 'val' and epoch_IoU > best_val_IoU:
-                best_val_IoU = epoch_IoU
+            if phase == 'val' and epoch_iou > best_val_iou:
+                best_val_iou = epoch_iou
                 best_model_wts = copy.deepcopy(model.state_dict())
             if phase == 'val':
-                val_IoU_history.append(epoch_IoU)
+                val_iou_history.append(epoch_iou)
                 loss_history.append(epoch_loss)
 
     # Print out best val acc
-    # time_elapsed = time.time() - since
-    # print('\nTraining complete in %.0fm %.0fs' % (time_elapsed // 60, time_elapsed % 60))
+    time_elapsed = time.time() - since
+    print('\nTraining complete in %.0fm %.0fs' % (time_elapsed // 60, time_elapsed % 60))
 
     # Load best model weights
     model.load_state_dict(best_model_wts)
@@ -317,10 +371,17 @@ def train(num_epochs, verbose=True):
     return model
 
 
+def inspect_features(features):
+    x = torch.zeros(1, 3, 224, 224)
+
+    for idx, layer in enumerate(features):
+        x = layer(x)
+        print(idx, layer, x.size())
+
+
 if __name__ == '__main__':
 
-
-    model = train(30)
-    torch.save(model.state_dict(), 'models/seg.pt')
+    seg_model = train(100)
+    torch.save(seg_model.state_dict(), '../results/saved_models/vgg_unet.pt')
 
     print('done')
