@@ -1,8 +1,4 @@
-scratch.py
-data*/
 .idea/
-figs/
-models/
-model_scripts/
-modules/
-temperature_scaling_ref.py
+datasets/
+results/
+

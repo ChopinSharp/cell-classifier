@@ -1,10 +1,10 @@
 import torch
 import torch.nn as nn
-from torchvision import models, transforms, datasets
+from torchvision import models, datasets
 import warnings
 import torch.optim as optim
-from transfer_learning import estimate_dataset_mean_and_std
-import opencv_transforms
+from main.cell_classifier import estimate_dataset_mean_and_std
+from utils import opencv_transforms
 import os
 import cv2
 import numpy as np

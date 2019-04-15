@@ -1,185 +1,26 @@
+from utils import *
+from main.cell_classifier import *
 import torch
-import torch.nn as nn
-import torch.optim as optim
-from torchvision import datasets, models, transforms
+from torch import nn, optim
 import matplotlib.pyplot as plt
-import warnings
-import time
-import os
 import copy
-from temperature_scaling import compute_temperature
-import opencv_transforms
-import cv2
-
-
-# Device to use in training
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-
-# Available models and their expected input size
-available_models_input_size = {
-    "resnet": 224,
-    "alexnet": 224,
-    "vgg": 224,
-    "squeezenet": 224,
-    "densenet": 224,
-    "inception": 299
-}
-
-
-def set_parameter_requires_grad(model, feature_extract):
-    """
-    Set the require_grads attribute of model's parameters according to feature_extract flag.
-    :param model: Model to operate on.
-    :param feature_extract: Feature extracting or finetuning.
-    """
-
-    if feature_extract:
-        for param in model.parameters():
-            param.requires_grad = False
-
-
-def initialize_model(model_name, num_classes, feature_extract, verbose=False):
-    """
-    Initialize required model and set it up for feature extracting or finetuning.
-    :param model_name: Type of model to initialize.
-    :param num_classes: Total number of target classes.
-    :param feature_extract: Feature extracting or finetuning.
-    :param verbose: Print model info in the end or not.
-    :return model_ft: Initialized model.
-    :return params_to_update: List of parameters to be updated during training.
-    """
-
-    model_ft = None
-
-    if model_name == "resnet":
-        """ Resnet18
-        """
-        model_ft = models.resnet18(pretrained=True)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs, num_classes)
-
-    elif model_name == "alexnet":
-        """ Alexnet
-        """
-        model_ft = models.alexnet(pretrained=True)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
-
-    elif model_name == "vgg":
-        """ VGG11_bn
-        """
-        model_ft = models.vgg11_bn(pretrained=True)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.classifier[6].in_features
-        model_ft.classifier[6] = nn.Linear(num_ftrs, num_classes)
-
-    elif model_name == "squeezenet":
-        """ Squeezenet
-        """
-        with warnings.catch_warnings():  # temporarily suppress warnings about deprecated functions
-            warnings.simplefilter("ignore")
-            model_ft = models.squeezenet1_0(pretrained=True)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        model_ft.classifier[1] = nn.Conv2d(512, num_classes, kernel_size=(1, 1), stride=(1, 1))
-        model_ft.num_classes = num_classes
-
-    elif model_name == "densenet":
-        """ Densenet
-        """
-        model_ft = models.densenet121(pretrained=True)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        num_ftrs = model_ft.classifier.in_features
-        model_ft.classifier = nn.Linear(num_ftrs, num_classes)
-
-    elif model_name == "inception":
-        """ Inception v3
-        Be careful, expects (299,299) sized images and has auxiliary output
-        """
-        model_ft = models.inception_v3(pretrained=True)
-        set_parameter_requires_grad(model_ft, feature_extract)
-        # Handle the auxilary net
-        num_ftrs = model_ft.AuxLogits.fc.in_features
-        model_ft.AuxLogits.fc = nn.Linear(num_ftrs, num_classes)
-        # Handle the primary net
-        num_ftrs = model_ft.fc.in_features
-        model_ft.fc = nn.Linear(num_ftrs, num_classes)
-
-    else:  # Unreachable
-        exit()
-
-    # Gather the parameters to be optimized
-    params_to_update = list(filter(lambda p: p.requires_grad, model_ft.parameters()))
-
-    # Print model info
-    if verbose:
-        print()
-        print(model_ft)
-        print()
-        print("Params to learn:")
-        for name, param in model_ft.named_parameters():
-            if param.requires_grad:
-                print('\t', name)
-
-    return model_ft, params_to_update
-
-
-def opencv_loader(path):
-    return cv2.imread(path, cv2.IMREAD_ANYDEPTH)
-
-
-def estimate_dataset_mean_and_std(data_dir, input_size):
-    """
-    Calculate dataset mean and standard deviation.
-    :param data_dir: Top directory of data.
-    :param input_size: Expected input size.
-    :return dataset_mean: Dataset mean.
-    :return dataset_std: Dataset standard deviation.
-    """
-
-    # Load all samples into a single dataset
-    dataset = torch.utils.data.ConcatDataset([
-        datasets.DatasetFolder(
-            os.path.join(data_dir, x),
-            opencv_loader,
-            ['jpg', 'tif'],
-            transform=transforms.Compose([
-                opencv_transforms.Resize(input_size),
-                opencv_transforms.ToTensor()
-            ])
-        )
-        for x in ['train', 'val', 'test']
-    ])
-
-    # Construct loader, trim off remainders
-    loader = torch.utils.data.DataLoader(dataset, batch_size=10, num_workers=5, drop_last=True)
-    num_batches = len(dataset) // 10
-
-    # Estimate mean and std
-    dataset_mean = torch.zeros(3)
-    dataset_std = torch.zeros(3)
-    for inputs, _ in iter(loader):
-        dataset_mean += inputs.mean(dim=(0, 2, 3))
-    dataset_mean /= num_batches
-    for inputs, _ in iter(loader):
-        dataset_std += torch.mean((inputs - dataset_mean.reshape((1, 3, 1, 1))) ** 2, dim=(0, 2, 3))
-    dataset_std = torch.sqrt(dataset_std.div(num_batches))
-
-    return dataset_mean.tolist(), dataset_std.tolist()
+import time
 
 
 def create_dataloaders(data_dir, input_size, batch_size):
-    """
-    Create datasets and dataloaders.
-    :param data_dir: Top directory of data.
-    :param input_size: Expected input size.
-    :param batch_size: Batch size.
-    :return dataloaders: A dictionary that holds dataloaders for training, validating and testing.
-    :return dataset_mean: Estimated mean of dataset.
-    :return dataset_std: Estimated standard deviation of dataset.
-    """
+    """Create datasets and dataloaders.
 
+    Args:
+        data_dir: Top directory of data.
+        input_size: Expected input size.
+        batch_size: Batch size.
+
+    Returns:
+        dataloaders: A dictionary that holds dataloaders for training, validating and testing.
+        dataset_mean: Estimated mean of dataset.
+        dataset_std: Estimated standard deviation of dataset.
+
+    """
     # Get dataset mean and std
     dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir, input_size)
 
@@ -356,8 +197,8 @@ def test_model(model, dataloader, is_inception=False):
     return test_acc, avg_conf
 
 
-def train(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_classes=3,
-          batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,)):
+def train_and_cross_validate(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_classes=3,
+                             batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,)):
     """
     Train and validate chosen model with set(s) of hyper-parameters,
     plot the training process, save the model if required, and print out
@@ -514,9 +355,4 @@ def convert_to_torch_script(model, input_size):
 
 
 if __name__ == '__main__':
-    train('data0229', model_name='squeezenet', num_epochs=25, model_dir='models')
-    pass
-
-
-
-
+    train_and_cross_validate('data0229', model_name='squeezenet', num_epochs=25, model_dir='models')

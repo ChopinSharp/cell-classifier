@@ -2,7 +2,7 @@ import torch
 import os
 import matplotlib.pyplot as plt
 from torchvision import transforms, datasets
-from transfer_learning import available_models_input_size, estimate_dataset_mean_and_std, initialize_model
+from main.cell_classifier import available_models_input_size, estimate_dataset_mean_and_std, initialize_model
 
 
 def compute_saliency_maps(model, inputs, labels):

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import models
-from transfer_learning import create_dataloaders, device, train_model, test_model
+from main.cell_classifier import create_dataloaders, device, train_model, test_model
 import warnings
 
 
