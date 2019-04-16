@@ -31,7 +31,10 @@ class _DecoderBlock(nn.Module):
             nn.Conv2d(in_channels, mid_channels, 3, 1, 1),
             nn.BatchNorm2d(mid_channels),
             nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(mid_channels, out_channels, t_conv_kernel_size, 2)
+            nn.ConvTranspose2d(mid_channels, mid_channels, t_conv_kernel_size, 2),
+            nn.Conv2d(mid_channels, out_channels, 3, 1, 1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
         )
 
     def forward(self, x):
@@ -241,7 +244,7 @@ def create_dataloaders(data_dir, batch_size):
     # Just normalization for validation
     data_transforms = {
         'train': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtRandomRotation(45),
+            opencv_transforms.ExtRandomRotation(20),
             opencv_transforms.ExtRandomResizedCrop(input_size, (0.8, 1.0)),
             opencv_transforms.ExtRandomHorizontalFlip(),
             opencv_transforms.ExtRandomVerticalFlip(),
@@ -278,9 +281,39 @@ def create_dataloaders(data_dir, batch_size):
     return dataloaders, dataset_mean, dataset_std
 
 
-def train(num_epochs, verbose=True):
+def test_model(model, loader):
+    model.eval()
+    metric = IOUMetric()
+    running_iou_0 = 0.
+    running_iou_1 = 0.
+    running_iou_2 = 0.
+    running_iou_3 = 0.
+    running_iou_avg = 0.
 
-    model = UnetVgg()
+    for inputs, labels in loader:
+        with torch.no_grad():
+            outputs = model(inputs)
+        preds = outputs.argmax(dim=1)
+        iou_0, iou_1, iou_2, iou_3, iou_avg = metric(labels, preds)
+        running_iou_0 += iou_0 * inputs.size(0)
+        running_iou_1 += iou_1 * inputs.size(0)
+        running_iou_2 += iou_2 * inputs.size(0)
+        running_iou_3 += iou_3 * inputs.size(0)
+        running_iou_avg += iou_avg * inputs.size(0)
+
+    test_iou_0 = running_iou_0 / len(loader.dataset)
+    test_iou_1 = running_iou_1 / len(loader.dataset)
+    test_iou_2 = running_iou_2 / len(loader.dataset)
+    test_iou_3 = running_iou_3 / len(loader.dataset)
+    test_iou_avg = running_iou_avg / len(loader.dataset)
+
+    return test_iou_0, test_iou_1, test_iou_2, test_iou_3, test_iou_avg
+
+
+def train_model(num_epochs, verbose=True):
+
+    model = UnetSqueeze()
+    model = model.to(device)
 
     for param in model.features.parameters():
         param.requires_grad = False
@@ -291,7 +324,7 @@ def train(num_epochs, verbose=True):
     metric = IOUMetric()
     optimizer = optim.Adam(
         model.decoder.parameters(),
-        lr=1e-3,
+        lr=2e-3,
         betas=(0.9, 0.999),
         eps=1e-08,
         weight_decay=1e-4,
@@ -299,7 +332,7 @@ def train(num_epochs, verbose=True):
     )
 
     # Prepare dataset
-    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229', 4)
+    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229', 8)
 
     # Main train loop
     val_iou_history = []
@@ -363,12 +396,22 @@ def train(num_epochs, verbose=True):
 
     # Print out best val acc
     time_elapsed = time.time() - since
-    print('\nTraining complete in %.0fm %.0fs' % (time_elapsed // 60, time_elapsed % 60))
+    print('\nTraining complete in %.0fh %.0fm %.0fs' %
+          (time_elapsed // 3600, time_elapsed % 3600 // 60, time_elapsed % 60))
 
     # Load best model weights
     model.load_state_dict(best_model_wts)
+    print('\nBest val IoU: %f', best_val_iou)
 
-    return model
+    t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg = test_model(model, dataloaders['test'])
+    print('Test results:')
+    print('iou_0: %f', t_iou_0)
+    print('iou_1: %f', t_iou_1)
+    print('iou_2: %f', t_iou_2)
+    print('iou_3: %f', t_iou_3)
+    print('iou_avg: %f', t_iou_avg)
+
+    return model, val_iou_history, loss_history
 
 
 def inspect_features(features):
@@ -379,9 +422,46 @@ def inspect_features(features):
         print(idx, layer, x.size())
 
 
+def visualize_model(model, loader):
+    model.eval()
+    palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
+    for sample, label in loader:
+        preds = model(sample).argmax(dim=1)
+        batch_size = sample.size()[0]
+        for i in range(batch_size):
+            gd = palette[label.detach().numpy()[i]]
+            pd = palette[preds.detach().numpy()[i]]
+            img = (255 * sample.detach().numpy()[i].transpose((1, 2, 0))).clip(0, 255).astype(np.uint8)
+            plt.subplot(3, batch_size, i + 1)
+            plt.title('img')
+            plt.imshow(img)
+            plt.subplot(3, batch_size, i + 1 + batch_size)
+            plt.title('gd')
+            plt.imshow(gd)
+            plt.subplot(3, batch_size, i + 1 + 2*batch_size)
+            plt.title('pd')
+            plt.imshow(pd)
+        plt.show()
+
+
 if __name__ == '__main__':
 
-    seg_model = train(100)
-    torch.save(seg_model.state_dict(), '../results/saved_models/vgg_unet.pt')
+    seg_model, val_hist, loss_hist = train_model(100)
+    torch.save(seg_model.state_dict(), '../results/saved_models/squeeze_unet2.0.pt')
+    plt.subplot(211)
+    plt.title('iou')
+    plt.plot(val_hist)
+    plt.subplot(212)
+    plt.title('loss')
+    plt.plot(loss_hist)
+    plt.savefig('../results/hist.png')
+
+    # m = UnetSqueeze()
+    # m.load_state_dict(torch.load('../results/saved_models/unet_squeeze.pt'))
+    # loaders, _, _ = create_dataloaders('../datasets/data0229', 4)
+    # visualize_model(m, loaders['test'])
+
+    # model_squ = models.squeezenet1_0()
+    # inspect_features(model_squ.features)
 
     print('done')
