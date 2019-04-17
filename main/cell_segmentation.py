@@ -405,11 +405,11 @@ def train_model(num_epochs, verbose=True):
 
     t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg = test_model(model, dataloaders['test'])
     print('Test results:')
-    print('iou_0: %f', t_iou_0)
-    print('iou_1: %f', t_iou_1)
-    print('iou_2: %f', t_iou_2)
-    print('iou_3: %f', t_iou_3)
-    print('iou_avg: %f', t_iou_avg)
+    print('iou_0: %f' % t_iou_0)
+    print('iou_1: %f' % t_iou_1)
+    print('iou_2: %f' % t_iou_2)
+    print('iou_3: %f' % t_iou_3)
+    print('iou_avg: %f' % t_iou_avg)
 
     return model, val_iou_history, loss_history
 
