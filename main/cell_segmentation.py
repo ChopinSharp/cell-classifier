@@ -9,7 +9,14 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import copy
-import time
+
+
+def load_pretrained_weights(model):
+    pretrained_model = None
+    if isinstance(model, UnetSqueeze):
+        pretrained_model = torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth'))
+
+    model.features.load_state_dict({k[9:]: v for k, v in pretrained_model.items() if k.split('.')[0] == 'features'})
 
 
 def initialize_weights(*model_list):
@@ -46,12 +53,7 @@ class UnetSqueeze(models.SqueezeNet):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             super(UnetSqueeze, self).__init__()
-
-        # self.state_dict().update(filter(lambda item: item[0] in self.state_dict(), standard_model.state_dict()))
-        self.load_state_dict(torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth')))
-
-        for param in self.parameters():
-            param.requires_grad = False
+            # self.load_state_dict(torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth')))
 
         del self.classifier
 
@@ -68,10 +70,47 @@ class UnetSqueeze(models.SqueezeNet):
         for layer in self.features:
             x = layer(x)
             activations.append(x)
+
         x = self.decoder[0](x)
         x = self.decoder[1](torch.cat((x, activations[7]), dim=1))
         x = self.decoder[2](torch.cat((x, activations[4]), dim=1))
         x = self.decoder[3](torch.cat((x, activations[1]), dim=1))
+        x = self.decoder[4](x)
+
+        return x
+
+
+class FnetSqueeze(models.SqueezeNet):
+    def __init__(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            super(FnetSqueeze, self).__init__()
+
+        # self.state_dict().update(filter(lambda item: item[0] in self.state_dict(), standard_model.state_dict()))
+        self.load_state_dict(torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth')))
+
+        for param in self.parameters():
+            param.requires_grad = False
+
+        del self.classifier
+
+        self.decoder = nn.ModuleList([
+            nn.ConvTranspose2d(512, 256, 3, 2),
+            _DecoderBlock(256, 256, 128, 2),
+            _DecoderBlock(128, 128, 64, 3),
+            _DecoderBlock(80, 80, 40, 8),
+            nn.Conv2d(40, 4, 3, 1, 1)
+        ])
+
+    def forward(self, x):
+        activations = []
+        for layer in self.features:
+            x = layer(x)
+            activations.append(x)
+        x = self.decoder[0](x)
+        x = self.decoder[1](x + activations[7])
+        x = self.decoder[2](x + activations[4])
+        x = self.decoder[3](x + activations[1])
         x = self.decoder[4](x)
 
         return x
@@ -185,8 +224,8 @@ class IOUMetric:
         return np.logical_and(gt == cls, lbl == cls).sum() / or_area
 
     def __call__(self, gt, lbl):
-        gt = gt.detach().numpy()
-        lbl = lbl.detach().numpy()
+        gt = gt.detach().cpu().numpy()
+        lbl = lbl.detach().cpu().numpy()
         # print(gt.shape, lbl.shape)
         iou_0 = self.calculate_iou(gt, lbl, 0)
         iou_1 = self.calculate_iou(gt, lbl, 1)
@@ -210,8 +249,8 @@ def visualize_result(root='data0229/val'):
     palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
     count = 0
     for sample, target in loader:
-        img = (255 * sample.detach().numpy()[0].transpose((1, 2, 0))).astype(np.uint8)
-        mask = palette[target.detach().numpy()[0]]
+        img = (255 * sample.detach().cpu().numpy()[0].transpose((1, 2, 0))).astype(np.uint8)
+        mask = palette[target.detach().cpu().numpy()[0]]
         plt.subplot(121)
         plt.imshow(img)
         plt.subplot(122)
@@ -291,6 +330,8 @@ def test_model(model, loader):
     running_iou_avg = 0.
 
     for inputs, labels in loader:
+        inputs = inputs.to(device)
+        labels = labels.to(device)
         with torch.no_grad():
             outputs = model(inputs)
         preds = outputs.argmax(dim=1)
@@ -310,99 +351,150 @@ def test_model(model, loader):
     return test_iou_0, test_iou_1, test_iou_2, test_iou_3, test_iou_avg
 
 
-def train_model(num_epochs, verbose=True):
+def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbose=True):
 
-    model = UnetSqueeze()
-    model = model.to(device)
-
-    for param in model.features.parameters():
-        param.requires_grad = False
+    # Initialize weights
     initialize_weights(model.decoder)
+    load_pretrained_weights(model)
 
-    # Set up criterion and optimizer
-    criterion = nn.CrossEntropyLoss()
-    metric = IOUMetric()
-    optimizer = optim.Adam(
-        model.decoder.parameters(),
-        lr=2e-3,
-        betas=(0.9, 0.999),
-        eps=1e-08,
-        weight_decay=1e-4,
-        amsgrad=False
-    )
-
-    # Prepare dataset
-    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229', 8)
-
-    # Main train loop
+    # Book keeping
     val_iou_history = []
     loss_history = []
-    best_model_wts = copy.deepcopy(model.state_dict())
-    best_val_iou = 0.0
-    since = time.time()
-    # Train for some epochs
-    for epoch in range(num_epochs):
-        if verbose:
-            print('\n+ Epoch %2d/%d' % (epoch + 1, num_epochs))
-            print('+', '-' * 11)
+    best_model_info = {
+        'model_dict': copy.deepcopy(model.state_dict()),
+        'val_iou': 0.,
+        'epoch': 0,
+        'half': 'empty'
+    }
 
-        # Each epoch has a training and validation phase
-        for phase in ['train', 'val']:
-            if phase == 'train':
-                model.train()  # Set model to training mode
-            else:
-                model.eval()  # Set model to evaluate mode
-
-            running_loss = 0.0
-            running_iou = 0.0
-
-            # Iterate over data.
-            for inputs, labels in dataloaders[phase]:
-                inputs = inputs.to(device)
-                labels = labels.to(device)
-
-                # Zero the parameter gradients
-                optimizer.zero_grad()
-
-                # Forward, track history if only in train
-                with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(inputs)
-                    loss = criterion(outputs, labels)
-
-                # Backward + optimize only if in training phase
-                if phase == 'train':
-                    loss.backward()
-                    optimizer.step()
-
-                # Record statistics
-                running_loss += loss.item() * inputs.size(0)
-                preds = outputs.argmax(dim=1)
-                # print(outputs.size(), preds.size())
-                iou_0, iou_1, iou_2, iou_3, iou_avg = metric(labels, preds)
-                running_iou += iou_avg * inputs.size(0)
-
-            epoch_loss = running_loss / len(dataloaders[phase].dataset)
-            epoch_iou = running_iou / len(dataloaders[phase].dataset)
+    # Train model
+    for half in ['Prologue', 'Epilogue']:
+        for param in model.features.parameters():
+            param.requires_grad = (half == 'Epilogue')
+        for epoch in range(epochs[half]):
             if verbose:
-                print('+ %s Loss: %.4f IoU: %.4f' % (phase, epoch_loss, epoch_iou))
+                print('\n+ [%s] Epoch %2d/%d' % (half, epoch + 1, epochs[half]))
+                print('+', '-' * 24)
 
-            # Deep copy the best model so far
-            if phase == 'val' and epoch_iou > best_val_iou:
-                best_val_iou = epoch_iou
-                best_model_wts = copy.deepcopy(model.state_dict())
-            if phase == 'val':
-                val_iou_history.append(epoch_iou)
-                loss_history.append(epoch_loss)
+            # Each epoch has a training and validation phase
+            for phase in ['train', 'val']:
+                if phase == 'train':
+                    model.train()  # Set model to training mode
+                else:
+                    model.eval()  # Set model to evaluate mode
 
-    # Print out best val acc
-    time_elapsed = time.time() - since
-    print('\nTraining complete in %.0fh %.0fm %.0fs' %
-          (time_elapsed // 3600, time_elapsed % 3600 // 60, time_elapsed % 60))
+                running_loss = 0.0
+                running_iou = 0.0
+
+                # Iterate over data.
+                for inputs, labels in dataloaders[phase]:
+                    inputs = inputs.to(device)
+                    labels = labels.to(device)
+
+                    # Zero the parameter gradients
+                    optimizers[half].zero_grad()
+
+                    # Forward, track history if only in train
+                    with torch.set_grad_enabled(phase == 'train'):
+                        outputs = model(inputs)
+                        loss = criterion(outputs, labels)
+
+                    # Backward + optimize only if in training phase
+                    if phase == 'train':
+                        loss.backward()
+                        optimizers[half].step()
+
+                    # Record statistics
+                    running_loss += loss.item() * inputs.size(0)
+                    preds = outputs.argmax(dim=1)
+                    # print(outputs.size(), preds.size())
+                    iou_0, iou_1, iou_2, iou_3, iou_avg = metric(labels, preds)
+                    running_iou += iou_avg * inputs.size(0)
+
+                epoch_loss = running_loss / len(dataloaders[phase].dataset)
+                epoch_iou = running_iou / len(dataloaders[phase].dataset)
+                if verbose:
+                    print('+ %s Loss: %.4f IoU: %.4f' % (phase, epoch_loss, epoch_iou))
+
+                # Deep copy the best model so far
+                if phase == 'val' and epoch_iou > best_model_info['val_iou']:
+                    best_model_info['val_iou'] = epoch_iou
+                    best_model_info['model_dict'] = copy.deepcopy(model.state_dict())
+                    best_model_info['epoch'] = epoch + 1
+                    best_model_info['half'] = half
+                if phase == 'val':
+                    val_iou_history.append(epoch_iou)
+                    loss_history.append(epoch_loss)
 
     # Load best model weights
-    model.load_state_dict(best_model_wts)
-    print('\nBest val IoU: %f', best_val_iou)
+    model.load_state_dict(best_model_info['model_dict'])
+    print('\n* Best val IoU: %(val_iou)f at [%(half)s] epoch %(epoch)d\n' % best_model_info)
 
+    return val_iou_history, loss_history
+
+
+def validate_model(model, lr_candidates, wd_candidates, epochs, batch_size=8, verbose=True):
+    # Move model to gpu if possible
+    model = model.to(device)
+
+    # Set up criterion and metric
+    criterion = nn.CrossEntropyLoss()
+    metric = IOUMetric()
+
+    # Prepare dataset
+    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229', batch_size)
+
+    # Validate model
+    best_model_info = {'lr': 0., 'wd': 0., 'val_iou': 0., 'model_dict': None}
+    total = len(lr_candidates) * len(wd_candidates)
+    counter = 0
+    for lr in lr_candidates:
+        for wd in wd_candidates:
+            print("* Tuning lr=%g, wd=%g" % (lr, wd))
+            # Construct optimizer
+            optimizers = {
+                'Prologue': optim.Adam(
+                    model.decoder.parameters(),
+                    lr=lr,
+                    betas=(0.9, 0.999),
+                    eps=1e-08,
+                    weight_decay=wd,
+                    amsgrad=False
+                ),
+                'Epilogue': optim.Adam(
+                    model.parameters(),
+                    lr=lr / 10,
+                    betas=(0.9, 0.999),
+                    eps=1e-08,
+                    weight_decay=wd,
+                    amsgrad=False
+                )
+            }
+            # Train model
+            val_iou_history, loss_history = train_model(model, criterion, metric, optimizers, dataloaders, epochs,
+                                                        verbose)
+            # Save best model information
+            this_val_iou = max(val_iou_history)
+            if this_val_iou > best_model_info['val_iou']:
+                best_model_info['lr'] = lr
+                best_model_info['wd'] = wd
+                best_model_info['val_iou'] = this_val_iou
+                best_model_info['model_dict'] = copy.deepcopy(model.state_dict())
+
+            # Plot training dynamics
+            plt.subplot(total, 2, 2 * counter + 1, figsize=(12, 16))
+            plt.title("[lr=%g, wd=%g] Loss" % (lr, wd))
+            plt.plot(loss_history)
+            plt.vlines(epochs['Prologue'] - 1, 0, max(loss_history), colors="r", linestyles="dashed")
+            plt.subplot(total, 2, 2 * counter + 2, figsize=(12, 16))
+            plt.title('Val IoU')
+            plt.plot(val_iou_history)
+            plt.vlines(epochs['Prologue'] - 1, 0, max(val_iou_history), colors="r", linestyles="dashed")
+            counter += 1
+    print('* Found best model at lr=%(lr)g, wd=%(wd)g, val_iou=%(val_iou)g\n' % best_model_info)
+    plt.savefig('../results/temp/val_stats.jpg')
+
+    # Test model
     t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg = test_model(model, dataloaders['test'])
     print('Test results:')
     print('iou_0: %f' % t_iou_0)
@@ -411,7 +503,8 @@ def train_model(num_epochs, verbose=True):
     print('iou_3: %f' % t_iou_3)
     print('iou_avg: %f' % t_iou_avg)
 
-    return model, val_iou_history, loss_history
+    # Reload best model
+    model.load_state_dict(best_model_info['model_dict'])
 
 
 def inspect_features(features):
@@ -429,9 +522,9 @@ def visualize_model(model, loader):
         preds = model(sample).argmax(dim=1)
         batch_size = sample.size()[0]
         for i in range(batch_size):
-            gd = palette[label.detach().numpy()[i]]
-            pd = palette[preds.detach().numpy()[i]]
-            img = (255 * sample.detach().numpy()[i].transpose((1, 2, 0))).clip(0, 255).astype(np.uint8)
+            gd = palette[label.detach().cpu().numpy()[i]]
+            pd = palette[preds.detach().cpu().numpy()[i]]
+            img = (255 * sample.detach().cpu().numpy()[i].transpose((1, 2, 0))).clip(0, 255).astype(np.uint8)
             plt.subplot(3, batch_size, i + 1)
             plt.title('img')
             plt.imshow(img)
@@ -444,17 +537,11 @@ def visualize_model(model, loader):
         plt.show()
 
 
-if __name__ == '__main__':
+def main():
 
-    seg_model, val_hist, loss_hist = train_model(100)
-    torch.save(seg_model.state_dict(), '../results/saved_models/squeeze_unet2.0.pt')
-    plt.subplot(211)
-    plt.title('iou')
-    plt.plot(val_hist)
-    plt.subplot(212)
-    plt.title('loss')
-    plt.plot(loss_hist)
-    plt.savefig('../results/hist.png')
+    model = UnetSqueeze()
+    validate_model(model, [5e-4, 5e-3], [1e-4], {'Prologue': 8, 'Epilogue': 2})
+    torch.save(model.state_dict(), '../results/saved_models/squeeze_unet2.0.pt')
 
     # m = UnetSqueeze()
     # m.load_state_dict(torch.load('../results/saved_models/unet_squeeze.pt'))
@@ -464,4 +551,11 @@ if __name__ == '__main__':
     # model_squ = models.squeezenet1_0()
     # inspect_features(model_squ.features)
 
-    print('done')
+    print('\ndone')
+
+
+if __name__ == '__main__':
+    main()
+    # m = UnetSqueeze()
+    # for i, _ in m.named_parameters():
+    #     print(i)
