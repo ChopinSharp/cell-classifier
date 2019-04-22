@@ -3,6 +3,14 @@ import torch
 from torchvision import datasets, transforms
 import os
 from utils import opencv_transforms
+from visdom import Visdom
+import numpy as np
+
+__all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'device', 'VisdomBoard']
+
+
+# Device to use in training
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
 def opencv_loader(path):
@@ -50,3 +58,73 @@ def estimate_dataset_mean_and_std(data_dir, input_size):
     dataset_std = torch.sqrt(dataset_std.div(num_batches))
 
     return dataset_mean.tolist(), dataset_std.tolist()
+
+
+class VisdomBoard:
+    def __init__(self, port=2333, info='', metric_label='metric', dummy=False):
+        if dummy:
+            return
+        # Construct Visdom obj
+        self.viz = Visdom(port=port)
+        # Initialize plots
+        self.metric_win = self.viz.line(
+            X=[np.NaN],
+            Y=[np.NaN],
+            name='Phase 1',
+            opts={
+                'title': '[%s] %s' % (info, metric_label),
+                'xlabel': 'epoch',
+                'ylabel': metric_label,
+                'showlegend': True
+            }
+        )
+        self.loss_win = self.viz.line(
+            X=[np.NaN],
+            Y=[np.NaN],
+            name='Phase 1',
+            opts={
+                'title': '[%s] Loss' % info,
+                'xlabel': 'epoch',
+                'ylabel': 'loss',
+                'showlegend': True
+            }
+        )
+
+    def _update(self, x, metric, loss, phase):
+        self.viz.line(
+            X=[x],
+            Y=[metric],
+            name=phase,
+            win=self.metric_win,
+            update='append'
+        )
+        self.viz.line(
+            X=[x],
+            Y=[loss],
+            name=phase,
+            win=self.loss_win,
+            update='append'
+        )
+
+    def update_phase_1(self, x, metric, loss):
+        self._update(x, metric, loss, 'Phase 1')
+
+    def update_phase_2(self, x, metric, loss):
+        self._update(x, metric, loss, 'Phase 2')
+
+    def update_last_phase_1(self, x, metric, loss):
+        self.update_phase_1(x, metric, loss)
+        self.viz.line(
+            X=[x],
+            Y=[metric],
+            win=self.metric_win,
+            name='Phase 2',
+            update='append'
+        )
+        self.viz.line(
+            X=[x],
+            Y=[loss],
+            win=self.loss_win,
+            name='Phase 2',
+            update='append'
+        )

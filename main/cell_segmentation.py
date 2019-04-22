@@ -1,39 +1,15 @@
-from utils import *
 import torch
 import torch.nn as nn
-from torchvision import models, datasets
+from torchvision import models
 import warnings
-import torch.optim as optim
-import os
-import cv2
-import numpy as np
-import matplotlib.pyplot as plt
-import copy
 
 
-def load_pretrained_weights(model):
-    pretrained_model = None
-    if isinstance(model, UnetSqueeze):
-        pretrained_model = torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth'))
-
-    model.features.load_state_dict({k[9:]: v for k, v in pretrained_model.items() if k.split('.')[0] == 'features'})
+__all__ = ['UNetSqueeze', 'UNetVgg', 'SegNet']
 
 
-def initialize_weights(*model_list):
-    for model in model_list:
-        for module in model.modules():
-            if isinstance(module, nn.Conv2d) or isinstance(module, nn.Linear):
-                nn.init.xavier_normal_(module.weight)
-                if module.bias is not None:
-                    module.bias.data.zero_()
-            elif isinstance(module, nn.BatchNorm2d):
-                module.weight.data.fill_(1)
-                module.bias.data.zero_()
-
-
-class _DecoderBlock(nn.Module):
+class _UNetSqueezeBasicBlock(nn.Module):
     def __init__(self, in_channels, mid_channels, out_channels, t_conv_kernel_size):
-        super(_DecoderBlock, self).__init__()
+        super(_UNetSqueezeBasicBlock, self).__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, 3, 1, 1),
             nn.BatchNorm2d(mid_channels),
@@ -48,20 +24,20 @@ class _DecoderBlock(nn.Module):
         return self.block(x)
 
 
-class UnetSqueeze(models.SqueezeNet):
+class UNetSqueeze(models.SqueezeNet):
     def __init__(self):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            super(UnetSqueeze, self).__init__()
+            super(UNetSqueeze, self).__init__()
             # self.load_state_dict(torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth')))
 
         del self.classifier
 
         self.decoder = nn.ModuleList([
             nn.ConvTranspose2d(512, 256, 3, 2),
-            _DecoderBlock(512, 256, 128, 2),
-            _DecoderBlock(256, 128, 64, 3),
-            _DecoderBlock(160, 80, 40, 8),
+            _UNetSqueezeBasicBlock(512, 256, 128, 2),
+            _UNetSqueezeBasicBlock(256, 128, 64, 3),
+            _UNetSqueezeBasicBlock(160, 80, 40, 8),
             nn.Conv2d(40, 4, 3, 1, 1)
         ])
 
@@ -80,49 +56,13 @@ class UnetSqueeze(models.SqueezeNet):
         return x
 
 
-class FnetSqueeze(models.SqueezeNet):
-    def __init__(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            super(FnetSqueeze, self).__init__()
-
-        # self.state_dict().update(filter(lambda item: item[0] in self.state_dict(), standard_model.state_dict()))
-        self.load_state_dict(torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth')))
-
-        for param in self.parameters():
-            param.requires_grad = False
-
-        del self.classifier
-
-        self.decoder = nn.ModuleList([
-            nn.ConvTranspose2d(512, 256, 3, 2),
-            _DecoderBlock(256, 256, 128, 2),
-            _DecoderBlock(128, 128, 64, 3),
-            _DecoderBlock(80, 80, 40, 8),
-            nn.Conv2d(40, 4, 3, 1, 1)
-        ])
-
-    def forward(self, x):
-        activations = []
-        for layer in self.features:
-            x = layer(x)
-            activations.append(x)
-        x = self.decoder[0](x)
-        x = self.decoder[1](x + activations[7])
-        x = self.decoder[2](x + activations[4])
-        x = self.decoder[3](x + activations[1])
-        x = self.decoder[4](x)
-
-        return x
-
-
-# Copied from https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
-def make_layers(cfg, batch_norm=False):
+# Code from torchvision package https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
+def make_layers(cfg, batch_norm=False, return_indices=False):
     layers = []
     in_channels = 3
     for v in cfg:
         if v == 'M':
-            layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+            layers += [nn.MaxPool2d(kernel_size=2, stride=2, return_indices=return_indices)]
         else:
             conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
             if batch_norm:
@@ -130,6 +70,8 @@ def make_layers(cfg, batch_norm=False):
             else:
                 layers += [conv2d, nn.ReLU(inplace=True)]
             in_channels = v
+    if return_indices:
+        return nn.ModuleList(layers)
     return nn.Sequential(*layers)
 
 
@@ -141,9 +83,9 @@ vgg_config = {
 }
 
 
-class _DecoderBasicBlock(nn.Module):
+class _UNetVggBasicBlock(nn.Module):
     def __init__(self, in_channels, mid_channels, out_channels):
-        super(_DecoderBasicBlock, self).__init__()
+        super(_UNetVggBasicBlock, self).__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, 3, 1, 1),
             nn.BatchNorm2d(mid_channels),
@@ -158,25 +100,20 @@ class _DecoderBasicBlock(nn.Module):
         return self.block(x)
 
 
-class UnetVgg(nn.Module):
-    def __init__(self, pretrained=True):
-        super(UnetVgg, self).__init__()
+class UNetVgg(nn.Module):
+    def __init__(self):
+        super(UNetVgg, self).__init__()
 
         # Construct and load vgg feature extracter
         self.features = make_layers(vgg_config['A'], batch_norm=True)
-        if pretrained:
-            vgg11_bn_pretrained = torch.load(os.path.expanduser('~/.torch/models/vgg11_bn-6002323d.pth'))
-            self.features.state_dict().update({
-                k: v for k, v in vgg11_bn_pretrained.items() if k.split('.')[0] == 'features'
-            })
 
         # Construct decoder
         self.decoder = nn.ModuleList([
-            _DecoderBasicBlock(512, 1024, 512),
-            _DecoderBasicBlock(1024, 512, 512),
-            _DecoderBasicBlock(1024, 512, 256),
-            _DecoderBasicBlock(512, 256, 128),
-            _DecoderBasicBlock(256, 128, 64),
+            _UNetVggBasicBlock(512, 1024, 512),
+            _UNetVggBasicBlock(1024, 512, 512),
+            _UNetVggBasicBlock(1024, 512, 256),
+            _UNetVggBasicBlock(512, 256, 128),
+            _UNetVggBasicBlock(256, 128, 64),
             nn.Conv2d(128, 64, 3, 1, 1),
             nn.Conv2d(64, 64, 3, 1, 1),
             nn.Conv2d(64, 4, 3, 1, 1)
@@ -200,362 +137,24 @@ class UnetVgg(nn.Module):
         return x
 
 
-class SegImgFolder(datasets.DatasetFolder):
-    def __init__(self, root, linked_transforms=None):
-        super(SegImgFolder, self).__init__(root, opencv_loader, ['.jpg', '.tif'])
-        self.linked_transforms = linked_transforms
+class _SegNetBasicBlock(nn.Module):
+    def __init__(self, conv_num, in_channels, out_channels):
+        super(_SegNetBasicBlock, self).__init__()
+        self.block = nn.ModuleList([nn.MaxUnpool2d(kernel_size=2, stride=2, padding=0)])
+        for _ in range(conv_num):
+            self.block.append(nn.Conv2d(in_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)))
 
-    def __getitem__(self, index):
-        img, lbl = super(SegImgFolder, self).__getitem__(index)
-        _, lbl = cv2.threshold(img, 0, lbl + 1, cv2.THRESH_OTSU | cv2.THRESH_BINARY)
-
-        if self.linked_transforms is not None:
-            img, lbl = self.linked_transforms(img, lbl)
-
-        return img, lbl
+    def forward(self, x, indices)
 
 
-class IOUMetric:
-    @staticmethod
-    def calculate_iou(gt, lbl, cls):
-        or_area = np.logical_or(gt == cls, lbl == cls).sum()
-        if or_area == 0:
-            return 1.
-        return np.logical_and(gt == cls, lbl == cls).sum() / or_area
+class SegNet(nn.Module):
+    def __init__(self):
+        super(SegNet, self).__init__()
+        self.features = make_layers(vgg_config['D'], batch_norm=True, return_indices=True)
+        self.decoder = nn.ModuleList([
+            torch.nn.MaxUnpool2d,
 
-    def __call__(self, gt, lbl):
-        gt = gt.detach().cpu().numpy()
-        lbl = lbl.detach().cpu().numpy()
-        # print(gt.shape, lbl.shape)
-        iou_0 = self.calculate_iou(gt, lbl, 0)
-        iou_1 = self.calculate_iou(gt, lbl, 1)
-        iou_2 = self.calculate_iou(gt, lbl, 2)
-        iou_3 = self.calculate_iou(gt, lbl, 3)
-        iou_avg = (iou_0 + iou_1 + iou_2 + iou_3) / 4
-        return iou_0, iou_1, iou_2, iou_3, iou_avg
-
-
-def visualize_result(root='data0229/val'):
-    dataset = SegImgFolder(
-        root,
-        linked_transforms=opencv_transforms.ExtCompose([
-            # opencv_transforms.ExtRandomHorizontalFlip(0.99),
-            # opencv_transforms.ExtRandomVerticalFlip(0.99),
-            # opencv_transforms.ExtRandomRotation(90),
-            opencv_transforms.ExtRandomResizedCrop(200)
         ])
-    )
-    loader = torch.utils.data.DataLoader(dataset, batch_size=1)
-    palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
-    count = 0
-    for sample, target in loader:
-        img = (255 * sample.detach().cpu().numpy()[0].transpose((1, 2, 0))).astype(np.uint8)
-        mask = palette[target.detach().cpu().numpy()[0]]
-        plt.subplot(121)
-        plt.imshow(img)
-        plt.subplot(122)
-        plt.imshow(mask)
-        plt.show()
-        count += 1
-        if count == 20:
-            break
 
-
-def create_dataloaders(data_dir, batch_size):
-    """Create datasets and dataloaders.
-
-    Args:
-        data_dir: Top directory of data.
-        batch_size: Batch size.
-
-    Returns:
-        dataloaders: A dictionary that holds dataloaders for training, validating and testing.
-        dataset_mean: Estimated mean of dataset.
-        dataset_std: Estimated standard deviation of dataset.
-
-    """
-    input_size = 224
-
-    # Get dataset mean and std
-    dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir, input_size)
-
-    # Data augmentation and normalization for training
-    # Just normalization for validation
-    data_transforms = {
-        'train': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtRandomRotation(20),
-            opencv_transforms.ExtRandomResizedCrop(input_size, (0.8, 1.0)),
-            opencv_transforms.ExtRandomHorizontalFlip(),
-            opencv_transforms.ExtRandomVerticalFlip(),
-            opencv_transforms.ExtToTensor(),
-            opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
-        ]),
-        'val': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtResize(input_size),
-            opencv_transforms.ExtToTensor(),
-            opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
-        ]),
-        'test': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtResize(input_size),
-            opencv_transforms.ExtToTensor(),
-            opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
-        ])
-    }
-
-    # Create training and validation datasets
-    image_datasets = {
-        x: SegImgFolder(
-            os.path.join(data_dir, x),
-            linked_transforms=data_transforms[x]
-        )
-        for x in ['train', 'val', 'test']
-    }
-
-    # Create training and validation dataloaders
-    dataloaders = {
-        x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=1)
-        for x in ['train', 'val', 'test']
-    }
-
-    return dataloaders, dataset_mean, dataset_std
-
-
-def test_model(model, loader):
-    model.eval()
-    metric = IOUMetric()
-    running_iou_0 = 0.
-    running_iou_1 = 0.
-    running_iou_2 = 0.
-    running_iou_3 = 0.
-    running_iou_avg = 0.
-
-    for inputs, labels in loader:
-        inputs = inputs.to(device)
-        labels = labels.to(device)
-        with torch.no_grad():
-            outputs = model(inputs)
-        preds = outputs.argmax(dim=1)
-        iou_0, iou_1, iou_2, iou_3, iou_avg = metric(labels, preds)
-        running_iou_0 += iou_0 * inputs.size(0)
-        running_iou_1 += iou_1 * inputs.size(0)
-        running_iou_2 += iou_2 * inputs.size(0)
-        running_iou_3 += iou_3 * inputs.size(0)
-        running_iou_avg += iou_avg * inputs.size(0)
-
-    test_iou_0 = running_iou_0 / len(loader.dataset)
-    test_iou_1 = running_iou_1 / len(loader.dataset)
-    test_iou_2 = running_iou_2 / len(loader.dataset)
-    test_iou_3 = running_iou_3 / len(loader.dataset)
-    test_iou_avg = running_iou_avg / len(loader.dataset)
-
-    return test_iou_0, test_iou_1, test_iou_2, test_iou_3, test_iou_avg
-
-
-def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbose=True):
-
-    # Initialize weights
-    initialize_weights(model.decoder)
-    load_pretrained_weights(model)
-
-    # Book keeping
-    val_iou_history = []
-    loss_history = []
-    best_model_info = {
-        'model_dict': copy.deepcopy(model.state_dict()),
-        'val_iou': 0.,
-        'epoch': 0,
-        'half': 'empty'
-    }
-
-    # Train model
-    for half in ['Prologue', 'Epilogue']:
-        for param in model.features.parameters():
-            param.requires_grad = (half == 'Epilogue')
-        for epoch in range(epochs[half]):
-            if verbose:
-                print('\n+ [%s] Epoch %2d/%d' % (half, epoch + 1, epochs[half]))
-                print('+', '-' * 24)
-
-            # Each epoch has a training and validation phase
-            for phase in ['train', 'val']:
-                if phase == 'train':
-                    model.train()  # Set model to training mode
-                else:
-                    model.eval()  # Set model to evaluate mode
-
-                running_loss = 0.0
-                running_iou = 0.0
-
-                # Iterate over data.
-                for inputs, labels in dataloaders[phase]:
-                    inputs = inputs.to(device)
-                    labels = labels.to(device)
-
-                    # Zero the parameter gradients
-                    optimizers[half].zero_grad()
-
-                    # Forward, track history if only in train
-                    with torch.set_grad_enabled(phase == 'train'):
-                        outputs = model(inputs)
-                        loss = criterion(outputs, labels)
-
-                    # Backward + optimize only if in training phase
-                    if phase == 'train':
-                        loss.backward()
-                        optimizers[half].step()
-
-                    # Record statistics
-                    running_loss += loss.item() * inputs.size(0)
-                    preds = outputs.argmax(dim=1)
-                    # print(outputs.size(), preds.size())
-                    iou_0, iou_1, iou_2, iou_3, iou_avg = metric(labels, preds)
-                    running_iou += iou_avg * inputs.size(0)
-
-                epoch_loss = running_loss / len(dataloaders[phase].dataset)
-                epoch_iou = running_iou / len(dataloaders[phase].dataset)
-                if verbose:
-                    print('+ %s Loss: %.4f IoU: %.4f' % (phase, epoch_loss, epoch_iou))
-
-                # Deep copy the best model so far
-                if phase == 'val' and epoch_iou > best_model_info['val_iou']:
-                    best_model_info['val_iou'] = epoch_iou
-                    best_model_info['model_dict'] = copy.deepcopy(model.state_dict())
-                    best_model_info['epoch'] = epoch + 1
-                    best_model_info['half'] = half
-                if phase == 'val':
-                    val_iou_history.append(epoch_iou)
-                    loss_history.append(epoch_loss)
-
-    # Load best model weights
-    model.load_state_dict(best_model_info['model_dict'])
-    print('\n* Best val IoU: %(val_iou)f at [%(half)s] epoch %(epoch)d\n' % best_model_info)
-
-    return val_iou_history, loss_history
-
-
-def validate_model(model, lr_candidates, wd_candidates, epochs, batch_size=8, verbose=True):
-    # Move model to gpu if possible
-    model = model.to(device)
-
-    # Set up criterion and metric
-    criterion = nn.CrossEntropyLoss()
-    metric = IOUMetric()
-
-    # Prepare dataset
-    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229', batch_size)
-
-    # Validate model
-    best_model_info = {'lr': 0., 'wd': 0., 'val_iou': 0., 'model_dict': None}
-    total = len(lr_candidates) * len(wd_candidates)
-    counter = 0
-    for lr in lr_candidates:
-        for wd in wd_candidates:
-            print("* Tuning lr=%g, wd=%g" % (lr, wd))
-            # Construct optimizer
-            optimizers = {
-                'Prologue': optim.Adam(
-                    model.decoder.parameters(),
-                    lr=lr,
-                    betas=(0.9, 0.999),
-                    eps=1e-08,
-                    weight_decay=wd,
-                    amsgrad=False
-                ),
-                'Epilogue': optim.Adam(
-                    model.parameters(),
-                    lr=lr / 10,
-                    betas=(0.9, 0.999),
-                    eps=1e-08,
-                    weight_decay=wd,
-                    amsgrad=False
-                )
-            }
-            # Train model
-            val_iou_history, loss_history = train_model(model, criterion, metric, optimizers, dataloaders, epochs,
-                                                        verbose)
-            # Save best model information
-            this_val_iou = max(val_iou_history)
-            if this_val_iou > best_model_info['val_iou']:
-                best_model_info['lr'] = lr
-                best_model_info['wd'] = wd
-                best_model_info['val_iou'] = this_val_iou
-                best_model_info['model_dict'] = copy.deepcopy(model.state_dict())
-
-            # Plot training dynamics
-            plt.subplot(total, 2, 2 * counter + 1, figsize=(12, 16))
-            plt.title("[lr=%g, wd=%g] Loss" % (lr, wd))
-            plt.plot(loss_history)
-            plt.vlines(epochs['Prologue'] - 1, 0, max(loss_history), colors="r", linestyles="dashed")
-            plt.subplot(total, 2, 2 * counter + 2, figsize=(12, 16))
-            plt.title('Val IoU')
-            plt.plot(val_iou_history)
-            plt.vlines(epochs['Prologue'] - 1, 0, max(val_iou_history), colors="r", linestyles="dashed")
-            counter += 1
-    print('* Found best model at lr=%(lr)g, wd=%(wd)g, val_iou=%(val_iou)g\n' % best_model_info)
-    plt.savefig('../results/temp/val_stats.jpg')
-
-    # Test model
-    t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg = test_model(model, dataloaders['test'])
-    print('Test results:')
-    print('iou_0: %f' % t_iou_0)
-    print('iou_1: %f' % t_iou_1)
-    print('iou_2: %f' % t_iou_2)
-    print('iou_3: %f' % t_iou_3)
-    print('iou_avg: %f' % t_iou_avg)
-
-    # Reload best model
-    model.load_state_dict(best_model_info['model_dict'])
-
-
-def inspect_features(features):
-    x = torch.zeros(1, 3, 224, 224)
-
-    for idx, layer in enumerate(features):
-        x = layer(x)
-        print(idx, layer, x.size())
-
-
-def visualize_model(model, loader):
-    model.eval()
-    palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
-    for sample, label in loader:
-        preds = model(sample).argmax(dim=1)
-        batch_size = sample.size()[0]
-        for i in range(batch_size):
-            gd = palette[label.detach().cpu().numpy()[i]]
-            pd = palette[preds.detach().cpu().numpy()[i]]
-            img = (255 * sample.detach().cpu().numpy()[i].transpose((1, 2, 0))).clip(0, 255).astype(np.uint8)
-            plt.subplot(3, batch_size, i + 1)
-            plt.title('img')
-            plt.imshow(img)
-            plt.subplot(3, batch_size, i + 1 + batch_size)
-            plt.title('gd')
-            plt.imshow(gd)
-            plt.subplot(3, batch_size, i + 1 + 2*batch_size)
-            plt.title('pd')
-            plt.imshow(pd)
-        plt.show()
-
-
-def main():
-
-    model = UnetSqueeze()
-    validate_model(model, [5e-4, 5e-3], [1e-4], {'Prologue': 8, 'Epilogue': 2})
-    torch.save(model.state_dict(), '../results/saved_models/squeeze_unet2.0.pt')
-
-    # m = UnetSqueeze()
-    # m.load_state_dict(torch.load('../results/saved_models/unet_squeeze.pt'))
-    # loaders, _, _ = create_dataloaders('../datasets/data0229', 4)
-    # visualize_model(m, loaders['test'])
-
-    # model_squ = models.squeezenet1_0()
-    # inspect_features(model_squ.features)
-
-    print('\ndone')
-
-
-if __name__ == '__main__':
-    main()
-    # m = UnetSqueeze()
-    # for i, _ in m.named_parameters():
-    #     print(i)
+    def forward(self, x):
+        pass

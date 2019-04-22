@@ -513,9 +513,9 @@ if __name__ == '__main__':
         cv2.destroyAllWindows()
 
     def test_ext(root='../datasets/data0229/val'):
-        from main.cell_segmentation import SegImgFolder
+        from main.cell_segmentation import SegmentationImageFolder
         import matplotlib.pyplot as plt
-        dataset = SegImgFolder(
+        dataset = SegmentationImageFolder(
             root,
             linked_transforms=ExtCompose([
                 # opencv_transforms.ExtRandomHorizontalFlip(0.99),
