@@ -10,6 +10,8 @@ import copy
 import torch.utils.model_zoo as model_zoo
 from main.cell_segmentation import *
 import argparse
+import time
+import matplotlib.pyplot as plt
 
 
 model_urls = {
@@ -25,7 +27,7 @@ def load_pretrained_weights(model):
         pretrained_model = model_zoo.load_url(model_urls['squeezenet1_0'])
     elif isinstance(model, UNetVgg):
         pretrained_model = model_zoo.load_url(model_urls['vgg11_bn'])
-    elif isinstance(model, SegNet):
+    elif isinstance(model, SegNetVgg16):
         pretrained_model = model_zoo.load_url(model_urls['vgg16_bn'])
 
     model.features.load_state_dict({
@@ -43,6 +45,20 @@ def initialize_weights(*model_list):
             elif isinstance(module, nn.BatchNorm2d):
                 module.weight.data.fill_(1)
                 module.bias.data.zero_()
+
+
+def set_parameter_requires_grad(model, phase):
+    if isinstance(model, UNetSqueeze):
+        for name, param in model.features.named_parameters():
+            param.requires_grad = (phase == 'Phase 2' and int(name.split('.')[0]) >= 7)
+    elif isinstance(model, UNetVgg):
+        for name, param in model.features.named_parameters():
+            param.requires_grad = (phase == 'Phase 2')# and int(name.split('.')[0]) >= 8) # 15
+    elif isinstance(model, SegNetVgg16):
+        for name, param in model.features.named_parameters():
+            param.requires_grad = (phase == 'Phase 2')# and int(name.split('.')[0]) >= 14) # 24
+    else:
+        raise Exception('Model type is not supported.')
 
 
 class SegmentationImageFolder(datasets.DatasetFolder):
@@ -80,7 +96,12 @@ class IoUMetric:
         return iou_0, iou_1, iou_2, iou_3, iou_avg
 
 
-def create_dataloaders(data_dir, batch_size):
+def get_scaled_size(size):
+    # Scale both height and width to multiples of 32
+    return size[0] // 32 * 32, size[1] // 32 * 32
+
+
+def create_dataloaders(data_dir, batch_size, img_size=(400, 600), verbose=True):
     """Create datasets and dataloaders.
 
     Args:
@@ -93,29 +114,31 @@ def create_dataloaders(data_dir, batch_size):
         dataset_std: Estimated standard deviation of dataset.
 
     """
-    input_size = 224
+
+    scaled_size = get_scaled_size(img_size)
+    print('* val and test images are scaled to', scaled_size)
 
     # Get dataset mean and std
-    dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir, input_size)
+    dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir)
 
     # Data augmentation and normalization for training
     # Just normalization for validation
     data_transforms = {
         'train': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtRandomRotation(20),
-            opencv_transforms.ExtRandomResizedCrop(input_size, (0.8, 1.0)),
+            opencv_transforms.ExtRandomRotation(45),
+            opencv_transforms.ExtRandomCrop(224),
             opencv_transforms.ExtRandomHorizontalFlip(),
             opencv_transforms.ExtRandomVerticalFlip(),
             opencv_transforms.ExtToTensor(),
             opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
         ]),
         'val': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtResize(input_size),
+            opencv_transforms.ExtResize(scaled_size),
             opencv_transforms.ExtToTensor(),
             opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
         ]),
         'test': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtResize(input_size),
+            opencv_transforms.ExtResize(scaled_size),
             opencv_transforms.ExtToTensor(),
             opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
         ])
@@ -131,8 +154,9 @@ def create_dataloaders(data_dir, batch_size):
     }
 
     # Create training and validation dataloaders
+    batch_sizes = {'train': batch_size, 'val': 4, 'test': 4}
     dataloaders = {
-        x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_size, shuffle=True, num_workers=1)
+        x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_sizes[x], shuffle=True, num_workers=1)
         for x in ['train', 'val', 'test']
     }
 
@@ -170,7 +194,7 @@ def test_model(model, loader):
     return test_iou_0, test_iou_1, test_iou_2, test_iou_3, test_iou_avg
 
 
-def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbose=True, viz_info=None):
+def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbose=True, viz_info=None, port=2337):
 
     # Initialize weights
     initialize_weights(model.decoder)
@@ -183,25 +207,24 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
         'model_dict': copy.deepcopy(model.state_dict()),
         'val_iou': 0.,
         'epoch': 0,
-        'half': 'empty'
+        'outer_phase': 'empty'
     }
 
     # Visdom setup
-    viz_board = VisdomBoard(port=2335, info=viz_info, metric_label='IoU', dummy=(not viz_info))
+    viz_board = VisdomBoard(port=port, info=viz_info, metric_label='IoU', dummy=(not viz_info))
     epoch_idx = 1
 
     # Train model
-    for half in ['Phase 1', 'Phase 2']:
-        for param in model.features.parameters():
-            param.requires_grad = (half == 'Phase 2')
-        for epoch in range(epochs[half]):
+    for outer_phase in ['Phase 1', 'Phase 2']:
+        set_parameter_requires_grad(model, outer_phase)
+        for epoch in range(epochs[outer_phase]):
             if verbose:
-                print('\n+ [%s] Epoch %2d/%d' % (half, epoch + 1, epochs[half]))
+                print('\n+ [%s] Epoch %2d/%d' % (outer_phase, epoch + 1, epochs[outer_phase]))
                 print('+', '-' * 24)
 
             # Each epoch has a training and validation phase
-            for phase in ['train', 'val']:
-                if phase == 'train':
+            for inner_phase in ['train', 'val']:
+                if inner_phase == 'train':
                     model.train()  # Set model to training mode
                 else:
                     model.eval()  # Set model to evaluate mode
@@ -210,22 +233,22 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
                 running_iou = 0.0
 
                 # Iterate over data.
-                for inputs, labels in dataloaders[phase]:
+                for inputs, labels in dataloaders[inner_phase]:
                     inputs = inputs.to(device)
                     labels = labels.to(device)
 
                     # Zero the parameter gradients
-                    optimizers[half].zero_grad()
+                    optimizers[outer_phase].zero_grad()
 
                     # Forward, track history if only in train
-                    with torch.set_grad_enabled(phase == 'train'):
+                    with torch.set_grad_enabled(inner_phase == 'train'):
                         outputs = model(inputs)
                         loss = criterion(outputs, labels)
 
                     # Backward + optimize only if in training phase
-                    if phase == 'train':
+                    if inner_phase == 'train':
                         loss.backward()
-                        optimizers[half].step()
+                        optimizers[outer_phase].step()
 
                     # Record statistics
                     running_loss += loss.item() * inputs.size(0)
@@ -234,20 +257,20 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
                     iou_0, iou_1, iou_2, iou_3, iou_avg = metric(labels, preds)
                     running_iou += iou_avg * inputs.size(0)
 
-                epoch_loss = running_loss / len(dataloaders[phase].dataset)
-                epoch_iou = running_iou / len(dataloaders[phase].dataset)
+                epoch_loss = running_loss / len(dataloaders[inner_phase].dataset)
+                epoch_iou = running_iou / len(dataloaders[inner_phase].dataset)
                 if verbose:
-                    print('+ %s Loss: %.4f IoU: %.4f' % (phase, epoch_loss, epoch_iou))
+                    print('+ %s Loss: %.4f IoU: %.4f' % (inner_phase, epoch_loss, epoch_iou))
 
                 # Deep copy the best model so far
-                if phase == 'val' and epoch_iou > best_model_info['val_iou']:
+                if inner_phase == 'val' and epoch_iou > best_model_info['val_iou']:
                     best_model_info['val_iou'] = epoch_iou
                     best_model_info['model_dict'] = copy.deepcopy(model.state_dict())
                     best_model_info['epoch'] = epoch + 1
-                    best_model_info['half'] = half
+                    best_model_info['outer_phase'] = outer_phase
 
                 # Record and visualize training dynamics
-                if phase == 'val':
+                if inner_phase == 'val':
                     val_iou_history.append(epoch_iou)
                     loss_history.append(epoch_loss)
                     if epoch_idx < epochs['Phase 1']:
@@ -260,12 +283,14 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
 
     # Load best model weights
     model.load_state_dict(best_model_info['model_dict'])
-    print('\n* Best val IoU: %(val_iou)f at [%(half)s] epoch %(epoch)d\n' % best_model_info)
+    print('\n* Best val IoU: %(val_iou)f at [%(outer_phase)s] epoch %(epoch)d\n' % best_model_info)
 
     return val_iou_history, loss_history
 
 
-def validate_model(model, lr_candidates, wd_candidates, epochs, batch_size=8, verbose=True):
+def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio=1/10, batch_size=8, verbose=True):
+    print('Validating', repr(model), '...')
+
     # Move model to gpu if possible
     model = model.to(device)
 
@@ -278,6 +303,7 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, batch_size=8, ve
 
     # Validate model
     best_model_info = {'lr': 0., 'wd': 0., 'val_iou': 0., 'model_dict': None}
+    since = time.time()
     for lr in lr_candidates:
         for wd in wd_candidates:
             print("* Tuning lr=%g, wd=%g" % (lr, wd))
@@ -293,7 +319,7 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, batch_size=8, ve
                 ),
                 'Phase 2': optim.Adam(
                     model.parameters(),
-                    lr=lr / 10,
+                    lr=lr * phase_2_lr_ratio,
                     betas=(0.9, 0.999),
                     eps=1e-08,
                     weight_decay=wd,
@@ -302,7 +328,7 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, batch_size=8, ve
             }
             # Train model
             val_iou_history, loss_history = train_model(model, criterion, metric, optimizers, dataloaders, epochs,
-                                                        verbose=verbose, viz_info='lr=%g wd=%g' % (lr, wd))
+                                                        verbose=verbose, viz_info='%s lr=%g wd=%g' % (repr(model),lr, wd))
             # Save best model information
             this_val_iou = max(val_iou_history)
             if this_val_iou > best_model_info['val_iou']:
@@ -310,6 +336,8 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, batch_size=8, ve
                 best_model_info['wd'] = wd
                 best_model_info['val_iou'] = this_val_iou
                 best_model_info['model_dict'] = copy.deepcopy(model.state_dict())
+    time_elapsed = time.time() - since
+    print('* Validation takes %d min, %d sec' % (time_elapsed // 60, time_elapsed % 60))
     print('* Found best model at lr=%(lr)g, wd=%(wd)g, val_iou=%(val_iou)g\n' % best_model_info)
 
     # Test model
@@ -325,34 +353,57 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, batch_size=8, ve
     model.load_state_dict(best_model_info['model_dict'])
 
 
-# def inspect_features(features):
-#     x = torch.zeros(1, 3, 224, 224)
-#
-#     for idx, layer in enumerate(features):
-#         x = layer(x)
-#         print(idx, layer, x.size())
+def infer(model, folder_url):
+    files = os.listdir(folder_url)
+    total = len(files)
+    fig = plt.figure(figsize=[8, 6 * total])
+
+    for idx, name in enumerate(files):
+        image_url = os.path.join(folder_url, name)
+        image = cv2.imread(image_url, cv2.IMREAD_COLOR | cv2.IMREAD_ANYDEPTH)
+        float_image = image.astype(np.float32) / 65536
+        inputs = torch.from_numpy(float_image.transpose((2, 0, 1)))
+        mean = inputs.mean()
+        std = inputs.std()
+        inputs = inputs.sub(mean).div(std).unsqueeze(0).float()
+        model.eval()
+        preds = model(inputs).argmax(dim=1)
+        palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
+        pd = palette[preds.detach().cpu().numpy()[0]]
+
+        ax = fig.add_subplot(total, 2, 2 * idx + 1)
+        ax.set_title('Image')
+        ax.imshow(float_image)
+        ax = fig.add_subplot(total, 2, 2 * idx + 2)
+        ax.set_title('Pred.')
+        ax.imshow(pd)
+        fig.savefig('result.jpg')
 
 
 def visualize_model(model, loader):
     model.eval()
     palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
-    for sample, label in loader:
+    os.makedirs('tmp', exist_ok=True)
+    counter = 1
+    for idx, (sample, label) in enumerate(loader):
         preds = model(sample).argmax(dim=1)
         batch_size = sample.size()[0]
+        fig = plt.figure(figsize=[19.2, 10.8])
         for i in range(batch_size):
             gd = palette[label.detach().cpu().numpy()[i]]
             pd = palette[preds.detach().cpu().numpy()[i]]
             img = (255 * sample.detach().cpu().numpy()[i].transpose((1, 2, 0))).clip(0, 255).astype(np.uint8)
-            # plt.subplot(3, batch_size, i + 1)
-            # plt.title('img')
-            # plt.imshow(img)
-            # plt.subplot(3, batch_size, i + 1 + batch_size)
-            # plt.title('gd')
-            # plt.imshow(gd)
-            # plt.subplot(3, batch_size, i + 1 + 2*batch_size)
-            # plt.title('pd')
-            # plt.imshow(pd)
-        # plt.show()
+            ax = fig.add_subplot(3, batch_size, i + 1)
+            ax.set_title('img')
+            ax.imshow(img)
+            ax = fig.add_subplot(3, batch_size, i + 1 + batch_size)
+            ax.set_title('gd')
+            ax.imshow(gd)
+            ax = fig.add_subplot(3, batch_size, i + 1 + 2*batch_size)
+            ax.set_title('pd')
+            ax.imshow(pd)
+        plt.savefig('tmp/%d.jpg' % counter)
+        counter += 1
 
 
 def main():
@@ -361,12 +412,39 @@ def main():
     # args = parser.parse_args()
 
     model = UNetVgg()
-    validate_model(model, [1e-5, 5e-5], [1e-5, 5e-5], {'Phase 1': 2, 'Phase 2': 10})
-    # torch.save(model.state_dict(), '../results/saved_models/squeeze_unet2.0.pt')
+    validate_model(
+        model,
+        # np.linspace(5e-6, 1e-4, 6),
+        # np.linspace(1e-6, 1e-3, 6),
+        [4e-5],
+        [2e-5],
+        {'Phase 1': 100, 'Phase 2': 100},
+        phase_2_lr_ratio=1 / 8,
+        batch_size=16
+    )
+    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/UNetVgg.pt'))
+    # model2 = SegNetVgg16()
+    # validate_model(
+    #     model2,
+    #     np.linspace(5e-6, 1e-4, 6),
+    #     np.linspace(1e-7, 1e-4, 6),
+    #     {'Phase 1': 50, 'Phase 2': 50},
+    #     phase_2_lr_ratio=1 / 5
+    # )
+    # torch.save(model.state_dict(), 'results/saved_models/SegNetVgg16.pt')
 
     print('\ndone')
 
 
 if __name__ == '__main__':
-    main()
+    model = UNetVgg()
+    model.load_state_dict(torch.load('../results/saved_models/UNetVgg.pt'))
+    infer(model, '../datasets/segtest0425')
+    #
+    # loaders, _, _ = create_dataloaders('../datasets/data0229', 4)
+    # visualize_model(model, loaders['test'])
+    image = cv2.imread('../datasets/segtest0424/CZ22405 Z ASIX-WOUND-001_w0001.tif', )
 
+    plt.imshow(image.astype(np.float) / 65536)
+    plt.show()
+    # main()

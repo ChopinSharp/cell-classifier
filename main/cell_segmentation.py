@@ -4,12 +4,12 @@ from torchvision import models
 import warnings
 
 
-__all__ = ['UNetSqueeze', 'UNetVgg', 'SegNet']
+__all__ = ['UNetSqueeze', 'UNetVgg', 'SegNetVgg16']
 
 
-class _UNetSqueezeBasicBlock(nn.Module):
+class _UNetSqueezeDecoderBasicBlock(nn.Module):
     def __init__(self, in_channels, mid_channels, out_channels, t_conv_kernel_size):
-        super(_UNetSqueezeBasicBlock, self).__init__()
+        super(_UNetSqueezeDecoderBasicBlock, self).__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, 3, 1, 1),
             nn.BatchNorm2d(mid_channels),
@@ -35,9 +35,9 @@ class UNetSqueeze(models.SqueezeNet):
 
         self.decoder = nn.ModuleList([
             nn.ConvTranspose2d(512, 256, 3, 2),
-            _UNetSqueezeBasicBlock(512, 256, 128, 2),
-            _UNetSqueezeBasicBlock(256, 128, 64, 3),
-            _UNetSqueezeBasicBlock(160, 80, 40, 8),
+            _UNetSqueezeDecoderBasicBlock(512, 256, 128, 2),
+            _UNetSqueezeDecoderBasicBlock(256, 128, 64, 3),
+            _UNetSqueezeDecoderBasicBlock(160, 80, 40, 8),
             nn.Conv2d(40, 4, 3, 1, 1)
         ])
 
@@ -55,12 +55,19 @@ class UNetSqueeze(models.SqueezeNet):
 
         return x
 
+    def __repr__(self):
+        return 'UNetSqueeze'
 
-# Code from torchvision package https://github.com/pytorch/vision/blob/master/torchvision/models/vgg.py
-def make_layers(cfg, batch_norm=False, return_indices=False):
+
+def _make_vgg_encoder_layers(version, batch_norm=True, return_indices=False):
+    config = {
+        'vgg11': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+        'vgg16': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M']
+    }
+    assert version in config.keys()
     layers = []
     in_channels = 3
-    for v in cfg:
+    for v in config[version]:
         if v == 'M':
             layers += [nn.MaxPool2d(kernel_size=2, stride=2, return_indices=return_indices)]
         else:
@@ -70,22 +77,12 @@ def make_layers(cfg, batch_norm=False, return_indices=False):
             else:
                 layers += [conv2d, nn.ReLU(inplace=True)]
             in_channels = v
-    if return_indices:
-        return nn.ModuleList(layers)
-    return nn.Sequential(*layers)
+    return layers
 
 
-vgg_config = {
-    'A': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
-    'B': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
-    'D': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M'],
-    'E': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 256, 'M', 512, 512, 512, 512, 'M', 512, 512, 512, 512, 'M'],
-}
-
-
-class _UNetVggBasicBlock(nn.Module):
+class _UNetVggDecoderBasicBlock(nn.Module):
     def __init__(self, in_channels, mid_channels, out_channels):
-        super(_UNetVggBasicBlock, self).__init__()
+        super(_UNetVggDecoderBasicBlock, self).__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, 3, 1, 1),
             nn.BatchNorm2d(mid_channels),
@@ -104,19 +101,25 @@ class UNetVgg(nn.Module):
     def __init__(self):
         super(UNetVgg, self).__init__()
 
-        # Construct and load vgg feature extracter
-        self.features = make_layers(vgg_config['A'], batch_norm=True)
+        # Construct and load vgg11_bn encoder
+        self.features = nn.Sequential(*_make_vgg_encoder_layers('vgg11'))
 
         # Construct decoder
         self.decoder = nn.ModuleList([
-            _UNetVggBasicBlock(512, 1024, 512),
-            _UNetVggBasicBlock(1024, 512, 512),
-            _UNetVggBasicBlock(1024, 512, 256),
-            _UNetVggBasicBlock(512, 256, 128),
-            _UNetVggBasicBlock(256, 128, 64),
-            nn.Conv2d(128, 64, 3, 1, 1),
-            nn.Conv2d(64, 64, 3, 1, 1),
-            nn.Conv2d(64, 4, 3, 1, 1)
+            _UNetVggDecoderBasicBlock(512, 1024, 512),
+            _UNetVggDecoderBasicBlock(1024, 512, 512),
+            _UNetVggDecoderBasicBlock(1024, 512, 256),
+            _UNetVggDecoderBasicBlock(512, 256, 128),
+            _UNetVggDecoderBasicBlock(256, 128, 64),
+            nn.Sequential(
+                nn.Conv2d(128, 64, 3, 1, 1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 64, 3, 1, 1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 4, 3, 1, 1)
+            )
         ])
 
     def forward(self, x):
@@ -131,30 +134,62 @@ class UNetVgg(nn.Module):
         x = self.decoder[3](torch.cat((x, features[13]), dim=1))
         x = self.decoder[4](torch.cat((x, features[6]), dim=1))
         x = self.decoder[5](torch.cat((x, features[2]), dim=1))
-        x = self.decoder[6](x)
-        x = self.decoder[7](x)
 
         return x
 
-
-class _SegNetBasicBlock(nn.Module):
-    def __init__(self, conv_num, in_channels, out_channels):
-        super(_SegNetBasicBlock, self).__init__()
-        self.block = nn.ModuleList([nn.MaxUnpool2d(kernel_size=2, stride=2, padding=0)])
-        for _ in range(conv_num):
-            self.block.append(nn.Conv2d(in_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)))
-
-    def forward(self, x, indices)
+    def __repr__(self):
+        return 'UNetVgg'
 
 
-class SegNet(nn.Module):
+class _SegNetDecoderBasicBlock(nn.Module):
+    def __init__(self, conv_num, in_channels, out_channels, last_block=False):
+        super(_SegNetDecoderBasicBlock, self).__init__()
+        self.unpool = nn.MaxUnpool2d(kernel_size=2, stride=2, padding=0)
+        convs = []
+        for idx in range(conv_num - 1):
+            convs.append(nn.Conv2d(in_channels, in_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)))
+            convs.append(nn.BatchNorm2d(in_channels))
+            if not last_block:
+                convs.append(nn.ReLU(inplace=True))
+        convs.append(nn.Conv2d(in_channels, out_channels, kernel_size=(3, 3), stride=(1, 1), padding=(1, 1)))
+        if not last_block:
+            convs.append(nn.BatchNorm2d(out_channels))
+            convs.append(nn.ReLU(inplace=True))
+        self.convs = nn.Sequential(*convs)
+
+    def forward(self, x, index):
+        x = self.unpool(x, index)
+        return self.convs(x)
+
+
+class SegNetVgg16(nn.Module):
     def __init__(self):
-        super(SegNet, self).__init__()
-        self.features = make_layers(vgg_config['D'], batch_norm=True, return_indices=True)
+        super(SegNetVgg16, self).__init__()
+        # Both self.features and self.decoder are of type nn.ModuleList
+        self.features = nn.ModuleList(_make_vgg_encoder_layers('vgg16', return_indices=True))
         self.decoder = nn.ModuleList([
-            torch.nn.MaxUnpool2d,
-
+            _SegNetDecoderBasicBlock(3, 512, 512),
+            _SegNetDecoderBasicBlock(3, 512, 256),
+            _SegNetDecoderBasicBlock(3, 256, 128),
+            _SegNetDecoderBasicBlock(2, 128, 64),
+            _SegNetDecoderBasicBlock(2, 64, 4, last_block=True)
         ])
 
     def forward(self, x):
-        pass
+        indices = []
+
+        for layer in self.features:
+            if isinstance(layer, nn.MaxPool2d):
+                x, index = layer(x)
+                indices.append(index)
+            else:
+                x = layer(x)
+
+        for layer in self.decoder:
+            x = layer(x, indices.pop())
+
+        return x
+
+    def __repr__(self):
+        return 'SegNetVgg16'
+

@@ -7,6 +7,8 @@ import matplotlib.pyplot as plt
 import copy
 import time
 import os
+import numpy as np
+from visdom import Visdom
 
 
 def create_dataloaders(data_dir, input_size, batch_size):
@@ -122,7 +124,6 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs, is_incepti
                 # Forward, track history if only in train
                 with torch.set_grad_enabled(phase == 'train'):
                     if is_inception and phase == 'train':
-                        # https://discuss.pytorch.org/t/how-to-optimize-inception-model-with-auxiliary-classifiers/7958
                         outputs, aux_outputs = model(inputs)
                         loss1 = criterion(outputs, labels)
                         loss2 = criterion(aux_outputs, labels)
@@ -154,10 +155,6 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs, is_incepti
             if phase == 'val':
                 val_acc_history.append(epoch_acc)
                 loss_history.append(epoch_loss)
-
-    # Print out best val acc
-    # time_elapsed = time.time() - since
-    # print('\nTraining complete in %.0fm %.0fs' % (time_elapsed // 60, time_elapsed % 60))
 
     # Load best model weights
     model.load_state_dict(best_model_wts)
@@ -205,25 +202,29 @@ def test_model(model, dataloader, is_inception=False):
     return test_acc, avg_conf
 
 
-def main(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_classes=3,
-         batch_size=4, num_epochs=20, feature_extract=True, learning_rates=(1e-3,), weight_decays=(1e-5,)):
+def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir='../results/saved_models',
+                   model_name='squeezenet', num_classes=3, batch_size=8, num_epochs=50, feature_extract=True,
+                   learning_rates=(1e-3,), weight_decays=(1e-5,), viz=None):
     """Train and validate chosen model with set(s) of hyper-parameters, plot the training process,
     save the model if required, and print out the test acc(s) in the end.
 
     Args:
         data_dir: Top level data directory.
-        model_name: Model to use.
+        script_dir: Directory to save traced script.
         model_dir: Directory to save trained model.
-        plot_dir: Directory to save training plots.
+        model_name: Model to use.
         num_classes: Total number of target classes.
         batch_size: Batch size for training.
         num_epochs: Number of epochs to train.
         feature_extract: Feature extracting or finetuning.
         learning_rates: Candidates of learning rates to use.
         weight_decays: Candidates of weight decays to use.
+        viz: Visdom object to visualize training process.
 
     Returns:
-        best model during training.
+        model: best model during validation.
+        best_val_acc: best val acc.
+        test_acc: test acc.
 
     """
     # Make sure model type is valid
@@ -282,18 +283,36 @@ def main(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_c
             )
 
             # Plot val acc and loss through learning process
-            if plot_dir is not None:
-                plt.title('Training Dynamics')
-                plt.subplot(211)
-                plt.xlabel('epoch')
-                plt.ylabel('val_acc')
-                plt.plot(val_acc_history)
-                plt.subplot(212)
-                plt.xlabel('epoch')
-                plt.ylabel('loss')
-                plt.plot(loss_history)
-                plot_name = 'lr=%.4e_wd=%.4e.jpg' % (learning_rate, weight_decay)
-                plt.savefig(os.path.join(plot_dir, plot_name))
+            if viz:
+                trace_name = '%s[lr=%g,wd=%g]' % (model_name, learning_rate, weight_decay)
+                viz.line(
+                    X=np.arange(1, 1 + len(val_acc_history)),
+                    Y=val_acc_history,
+                    name=trace_name,
+                    win='Val Acc',
+                    opts={
+                        'title': 'Val Acc',
+                        'xlabel': 'epoch',
+                        'ylabel': 'val_acc',
+                        'showlegend': True,
+                        'height': 400,
+                        'width': 700
+                    }
+                )
+                viz.line(
+                    X=np.arange(1, 1 + len(loss_history)),
+                    Y=loss_history,
+                    name=trace_name,
+                    win='Loss',
+                    opts={
+                        'title': 'Loss',
+                        'xlabel': 'epoch',
+                        'ylabel': 'loss',
+                        'showlegend': True,
+                        'height': 400,
+                        'width': 700
+                    }
+                )
 
             # Print val acc for this set of hyper-parameters
             this_val_acc = max(val_acc_history)
@@ -316,8 +335,8 @@ def main(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_c
     temperature = compute_temperature(best_model, dataloaders['val'], verbose=True)
 
     # For dev purpose ...
-    os.makedirs('modules', exist_ok=True)
-    torch.save(best_model.state_dict(), '../results/saved_models/%s.pt' % model_name)
+    if model_dir:
+        torch.save(best_model.state_dict(), os.path.abspath(os.path.join(model_dir, model_name + '.pt')))
 
     # Convert to torch script for inference efficiency
     best_model = convert_to_torch_script(best_model, available_models_input_size[model_name])
@@ -327,8 +346,8 @@ def main(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_c
     print('\nTest Acc: %.4f' % test_acc)
 
     # Save the best model to disk
-    if model_dir is not None:
-        os.makedirs(model_dir, exist_ok=True)
+    if script_dir:
+        os.makedirs(script_dir, exist_ok=True)
         print('\nSaving model ...')
         info_list = [
             model_name,                         # model type
@@ -338,11 +357,11 @@ def main(data_dir, model_name='squeezenet', model_dir=None, plot_dir=None, num_c
             '%.5f' % dataset_std[0]
         ]
         file_name = '%'.join(info_list) + '.pt'
-        file_url = os.path.join(model_dir, file_name)
+        file_url = os.path.join(script_dir, file_name)
         best_model.save(file_url)
         print('\nModel saved to %s\n' % file_url)
 
-    return best_model
+    return best_model, best_val_acc, test_acc
 
 
 def convert_to_torch_script(model, input_size):
@@ -367,5 +386,15 @@ def convert_to_torch_script(model, input_size):
     return traced_script_module
 
 
+def main():
+    viz = Visdom(port=2337, env='测试不同分类模型')
+    acc_list = []
+    model_name_list = list(available_models_input_size.keys())
+    for model_name in model_name_list:
+        _, *acc = validate_model('../datasets/data0229', model_name=model_name, viz=viz)
+        acc_list.append(acc)
+    viz.bar(X=acc_list, opts=dict(rownames=model_name_list, legend=['val acc', 'test acc']))
+
+
 if __name__ == '__main__':
-    main('../datasets/data0229', model_name='squeezenet', num_epochs=25, model_dir='../results/saved_scripts')
+    main()

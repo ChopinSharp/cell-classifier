@@ -1,10 +1,17 @@
+"""
+Script to test the impact of depth of Squeeze Net 1.0 on model accuracy.
+"""
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import models
-from main.cell_classifier import create_dataloaders, device, train_model, test_model
+import torch.utils.model_zoo as model_zoo
 import warnings
-
+from utils import *
+from scripts.train_classifier import create_dataloaders, train_model
+from visdom import Visdom
+import numpy as np
 
 def get_activation_size(model, verbose=False):
     activation_size = []
@@ -18,23 +25,22 @@ def get_activation_size(model, verbose=False):
 
 
 class SqueezeNetOfDepth(models.SqueezeNet):
+    """ Squeeze Net of specific depth with pretrained weights. """
+
     def __init__(self, depth):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             super(SqueezeNetOfDepth, self).__init__()
-            standard_model = models.squeezenet1_0(True)
 
         self.depth = depth
 
-        # self.state_dict().update(filter(lambda item: item[0] in self.state_dict(), standard_model.state_dict()))
-        self.load_state_dict(torch.load('/home/mwb/.torch/models/squeezenet1_0-a815701f.pth'))
+        self.load_state_dict(model_zoo.load_url('https://download.pytorch.org/models/squeezenet1_0-a815701f.pth'))
 
-        activation_size = get_activation_size(standard_model.features)
+        activation_size = get_activation_size(self.features)
         for param in self.parameters():
             param.requires_grad = False
         self.classifier[1] = nn.Conv2d(activation_size[depth]['channel'], 3, kernel_size=(1, 1), stride=(1, 1))
         self.classifier[3] = nn.AdaptiveAvgPool2d((1, 1))
-        # nn.AvgPool2d(kernel_size=activation_size[depth]['size'], stride=1, padding=0)
         self.num_classes = 3
 
     def forward(self, x):
@@ -46,11 +52,11 @@ class SqueezeNetOfDepth(models.SqueezeNet):
         return x.view(x.size(0), self.num_classes)
 
 
-def test_depth():
+def main():
+
     # Create dataloaders
     print('Loading dataset ...\n')
-    dataloaders, dataset_mean, dataset_std = \
-        create_dataloaders('data0229', 224, 4)
+    dataloaders, dataset_mean, dataset_std = create_dataloaders('data0229', 224, 4)
     print('+ Dataset mean:', dataset_mean[0])
     print('+ Dataset standard deviation:', dataset_std[0])
     dataset_sizes = {x: len(dataloaders[x].dataset) for x in ['train', 'val', 'test']}
@@ -59,6 +65,8 @@ def test_depth():
     # Setup the loss function
     criterion = nn.CrossEntropyLoss()
 
+    # Train Squeeze Net of different depths
+    val_acc_of_depth = []
     for depth in range(13):
         print('At depth', depth)
 
@@ -88,16 +96,26 @@ def test_depth():
             is_inception=False
         )
 
-        # Print val acc for this set of hyper-parameters
-        this_val_acc = max(val_acc_history)
+        # Print out best val acc
+        best_val_acc = max(val_acc_history)
+        print('depth: %d, best val acc: %f' % (depth, best_val_acc))
+        val_acc_of_depth.append(best_val_acc)
 
-        # Test model
-        test_acc, _ = test_model(model, dataloaders['test'])
-        print('\n* depth=%d, max_val_acc=%.4f, test_acc=%.4f\n\n' % (depth, this_val_acc, test_acc))
-
+    # Visualize result
+    viz = Visdom(port=2337, env='测试模型深度对精度的影响')
+    viz.line(
+        X=np.arange(1, 14),
+        Y=val_acc_of_depth,
+        name='best val acc',
+        opts={
+            'title': '模型深度对精度的影响',
+            'xlabel': 'depth',
+            'ylabel': 'acc',
+            'showlegend': True,
+            'height': 400,
+            'width': 700
+        }
+    )
 
 if __name__ == '__main__':
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        standard_model = models.squeezenet1_0(True)
-        get_activation_size(standard_model.features, True)
+    main()

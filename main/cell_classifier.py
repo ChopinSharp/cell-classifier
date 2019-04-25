@@ -3,14 +3,16 @@ from torchvision import models
 import warnings
 
 
+__all__ = ['available_models_input_size', 'initialize_model']
+
 # Available models and their expected input size
 available_models_input_size = {
-    "resnet": 224,
-    "alexnet": 224,
-    "vgg": 224,
-    "squeezenet": 224,
-    "densenet": 224,
-    "inception": 299
+    'resnet': 224,
+    'alexnet': 224,
+    'vgg': 224,
+    'squeezenet': 224,
+    'densenet': 224,
+    'inception': 299
 }
 
 

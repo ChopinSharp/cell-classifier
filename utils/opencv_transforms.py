@@ -215,6 +215,7 @@ class ExtResize:
         :param size: Of type int. Expected size.
         :param interpolation: Sampling method to use.
         """
+        assert len(size) == 2, 'Size has to be a 2-tuple'
         self.size = size
         self.interpolation = interpolation
 
@@ -223,8 +224,8 @@ class ExtResize:
         :param img: Of type numpy.ndarray. Image to be scaled.
         :return: Rescaled image.
         """
-        resized_img = cv2.resize(img, (self.size, self.size), interpolation=self.interpolation)
-        resized_lbl = cv2.resize(lbl, (self.size, self.size), interpolation=cv2.INTER_NEAREST)
+        resized_img = cv2.resize(img, self.size, interpolation=self.interpolation)
+        resized_lbl = cv2.resize(lbl, self.size, interpolation=cv2.INTER_NEAREST)
         return resized_img, resized_lbl
 
 
@@ -303,6 +304,17 @@ class ExtRandomResizedCrop:
         scaled_img = cv2.resize(img[i:i+h, j:j+w], self.size, interpolation=cv2.INTER_LINEAR)
         scaled_lbl = cv2.resize(lbl[i:i+h, j:j+w], self.size, interpolation=cv2.INTER_NEAREST)
         return scaled_img, scaled_lbl
+
+
+class ExtRandomCrop:
+    def __init__(self, size=224):
+        self.size = size
+
+    def __call__(self, img, lbl):
+        assert img.shape[0] > self.size and img.shape[1] > self.size, 'No room for randomness!'
+        hi = random.randint(0, img.shape[0] - self.size)
+        wi = random.randint(0, img.shape[1] - self.size)
+        return img[hi:hi + self.size, wi:wi + self.size], lbl[hi:hi + self.size, wi:wi + self.size]
 
 
 class ExtRandomHorizontalFlip:

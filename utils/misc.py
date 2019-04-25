@@ -17,7 +17,7 @@ def opencv_loader(path):
     return cv2.imread(path, cv2.IMREAD_ANYDEPTH)
 
 
-def estimate_dataset_mean_and_std(data_dir, input_size):
+def estimate_dataset_mean_and_std(data_dir, input_size=None):
     """Calculate dataset mean and standard deviation.
 
     Args:
@@ -30,15 +30,19 @@ def estimate_dataset_mean_and_std(data_dir, input_size):
 
     """
     # Load all samples into a single dataset
+    if input_size:
+        transform = transforms.Compose([
+            opencv_transforms.Resize(input_size),
+            opencv_transforms.ToTensor()
+        ])
+    else:
+        transform = opencv_transforms.ToTensor()
     dataset = torch.utils.data.ConcatDataset([
         datasets.DatasetFolder(
             os.path.join(data_dir, x),
             opencv_loader,
             ['jpg', 'tif'],
-            transform=transforms.Compose([
-                opencv_transforms.Resize(input_size),
-                opencv_transforms.ToTensor()
-            ])
+            transform=transform
         )
         for x in ['train', 'val', 'test']
     ])
@@ -75,7 +79,9 @@ class VisdomBoard:
                 'title': '[%s] %s' % (info, metric_label),
                 'xlabel': 'epoch',
                 'ylabel': metric_label,
-                'showlegend': True
+                'showlegend': True,
+                'height': 400,
+                'width': 700
             }
         )
         self.loss_win = self.viz.line(
@@ -86,7 +92,9 @@ class VisdomBoard:
                 'title': '[%s] Loss' % info,
                 'xlabel': 'epoch',
                 'ylabel': 'loss',
-                'showlegend': True
+                'showlegend': True,
+                'height': 400,
+                'width': 700
             }
         )
 
