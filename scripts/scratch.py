@@ -17,14 +17,16 @@ def show_threshold(path):
     plt.show()
 
 
-def main():
-    show_threshold('../datasets/segtest0424/CZ22405 Z ASIX-WOUND-001_w0001.tif')
-    # for name in os.listdir(data_dir):
-    #     path = os.path.join(data_dir, name)
+def inspect_dataset():
+    from utils.misc import estimate_dataset_mean_and_std
+    mean, std = estimate_dataset_mean_and_std('../datasets/data0229', 300)
+    print(mean, std)
+    mean, std = estimate_dataset_mean_and_std('../datasets/data0318', 300)
+    print(mean, std)
 
 
 if __name__ == '__main__':
-    main()
+    inspect_dataset()
 
 
 

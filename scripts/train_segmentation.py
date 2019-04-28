@@ -12,6 +12,7 @@ from main.cell_segmentation import *
 import argparse
 import time
 import matplotlib.pyplot as plt
+from PIL import Image
 
 
 model_urls = {
@@ -353,20 +354,37 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio
     model.load_state_dict(best_model_info['model_dict'])
 
 
+def get_merged_tif(image_url, verbose=False):
+    image_stack = Image.open(image_url)
+    merged_image = np.zeros(image_stack.size, dtype=np.float32)
+    print(image_stack.n_frames, 'frames in', image_url)
+    for i in range(image_stack.n_frames):
+        image_stack.seek(i)
+        merged_image += np.fromstring(image_stack.tobytes(), dtype=np.uint16).reshape(*image_stack.size)
+    merged_image /= 65536
+    merged_image = merged_image.clip(0, 1)
+
+    return np.concatenate([merged_image[:, :, np.newaxis]] * 3, axis=2)
+
+
 def infer(model, folder_url):
     files = os.listdir(folder_url)
     total = len(files)
     fig = plt.figure(figsize=[8, 6 * total])
-
+    model.eval()
     for idx, name in enumerate(files):
         image_url = os.path.join(folder_url, name)
-        image = cv2.imread(image_url, cv2.IMREAD_COLOR | cv2.IMREAD_ANYDEPTH)
-        float_image = image.astype(np.float32) / 65536
+        # float_image = get_merged_tif(image_url, verbose=True)
+        image = (cv2.imread(image_url, cv2.IMREAD_ANYDEPTH) / 256).astype(np.uint8)
+        image_enhanced = cv2.equalizeHist(image)
+        float_image = image_enhanced.astype(np.float32) / 256
+        float_image = np.concatenate([float_image[:, :, np.newaxis]] * 3, axis=2)
         inputs = torch.from_numpy(float_image.transpose((2, 0, 1)))
         mean = inputs.mean()
         std = inputs.std()
+        print('mean:', mean, 'std:', std)
         inputs = inputs.sub(mean).div(std).unsqueeze(0).float()
-        model.eval()
+
         preds = model(inputs).argmax(dim=1)
         palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
         pd = palette[preds.detach().cpu().numpy()[0]]
@@ -439,12 +457,12 @@ def main():
 if __name__ == '__main__':
     model = UNetVgg()
     model.load_state_dict(torch.load('../results/saved_models/UNetVgg.pt'))
-    infer(model, '../datasets/segtest0425')
+    infer(model, '../datasets/segtest0426')
+    # #
+    # # loaders, _, _ = create_dataloaders('../datasets/data0229', 4)
+    # # visualize_model(model, loaders['test'])
+    # image = cv2.imread('../datasets/segtest0424/CZ22405 Z ASIX-WOUND-001_w0001.tif', )
     #
-    # loaders, _, _ = create_dataloaders('../datasets/data0229', 4)
-    # visualize_model(model, loaders['test'])
-    image = cv2.imread('../datasets/segtest0424/CZ22405 Z ASIX-WOUND-001_w0001.tif', )
-
-    plt.imshow(image.astype(np.float) / 65536)
-    plt.show()
+    # plt.imshow(image.astype(np.float) / 65536)
+    # plt.show()
     # main()
