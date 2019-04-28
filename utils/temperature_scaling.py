@@ -1,9 +1,12 @@
 import torch
 from torch import nn, optim
 from torch.nn import functional as F
+from utils import device
 
 
 def compute_temperature(model, val_loader=None, verbose=False):
+    model = model.to('cpu')
+
     temperature = torch.tensor(1.0, requires_grad=True)
 
     # Declare criterions
@@ -52,6 +55,7 @@ def compute_temperature(model, val_loader=None, verbose=False):
         print('+ Before temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_before_scaling, ece_before_scaling))
         print('+ After temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_after_scaling, ece_after_scaling))
 
+    model.to(device)
     return opt_temperature
 
 

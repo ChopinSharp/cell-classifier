@@ -56,7 +56,7 @@ def main():
 
     # Create dataloaders
     print('Loading dataset ...\n')
-    dataloaders, dataset_mean, dataset_std = create_dataloaders('data0229', 224, 4)
+    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229', 224, 4)
     print('+ Dataset mean:', dataset_mean[0])
     print('+ Dataset standard deviation:', dataset_std[0])
     dataset_sizes = {x: len(dataloaders[x].dataset) for x in ['train', 'val', 'test']}
@@ -116,6 +116,7 @@ def main():
             'width': 700
         }
     )
+
 
 if __name__ == '__main__':
     main()

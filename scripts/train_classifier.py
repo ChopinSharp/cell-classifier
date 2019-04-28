@@ -290,6 +290,7 @@ def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir='.
                     Y=val_acc_history,
                     name=trace_name,
                     win='Val Acc',
+                    update='append',
                     opts={
                         'title': 'Val Acc',
                         'xlabel': 'epoch',
@@ -304,6 +305,7 @@ def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir='.
                     Y=loss_history,
                     name=trace_name,
                     win='Loss',
+                    update='append',
                     opts={
                         'title': 'Loss',
                         'xlabel': 'epoch',
@@ -338,15 +340,14 @@ def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir='.
     if model_dir:
         torch.save(best_model.state_dict(), os.path.abspath(os.path.join(model_dir, model_name + '.pt')))
 
-    # Convert to torch script for inference efficiency
-    best_model = convert_to_torch_script(best_model, available_models_input_size[model_name])
-
     # Test model
     test_acc, _ = test_model(best_model, dataloaders['test'])
     print('\nTest Acc: %.4f' % test_acc)
 
     # Save the best model to disk
     if script_dir:
+        # Convert to torch script for inference efficiency
+        best_model = convert_to_torch_script(best_model, available_models_input_size[model_name])
         os.makedirs(script_dir, exist_ok=True)
         print('\nSaving model ...')
         info_list = [
@@ -387,13 +388,8 @@ def convert_to_torch_script(model, input_size):
 
 
 def main():
-    viz = Visdom(port=2337, env='测试不同分类模型')
-    acc_list = []
-    model_name_list = list(available_models_input_size.keys())
-    for model_name in model_name_list:
-        _, *acc = validate_model('../datasets/data0229', model_name=model_name, viz=viz)
-        acc_list.append(acc)
-    viz.bar(X=acc_list, opts=dict(rownames=model_name_list, legend=['val acc', 'test acc']))
+    validate_model('../datasets/data0229', model_name='squeezenet', viz=None, num_epochs=30,
+                   feature_extract=True)
 
 
 if __name__ == '__main__':

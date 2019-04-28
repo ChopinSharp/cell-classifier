@@ -2,7 +2,8 @@ import torch
 import os
 import matplotlib.pyplot as plt
 from torchvision import transforms, datasets
-from main.cell_classifier import available_models_input_size, estimate_dataset_mean_and_std, initialize_model
+from main.cell_classifier import available_models_input_size, initialize_model
+from utils import *
 
 
 def compute_saliency_maps(model, inputs, labels):
@@ -24,7 +25,8 @@ def compute_saliency_maps(model, inputs, labels):
     # Combine scores across a batch by summing
     sum_score = model(inputs).gather(1, labels.view(-1, 1)).squeeze().sum()
     sum_score.backward()
-    saliency = inputs.grad.mean(dim=1)
+    saliency, _ = inputs.grad.max(dim=1)
+    # saliency = inputs.grad.mean(dim=1)
 
     return saliency
 
@@ -65,7 +67,7 @@ def show_saliency_maps(model, inputs, labels, images, class_names):
     plt.show()
 
 
-def visualize_model(model_dir='modules', data_dir='data0229', num_samples=5):
+def visualize_model(model_dir='../results/saved_models', data_dir='../datasets/data0229', num_samples=4):
     """
     Visualize model via saliency maps.
     :param model_dir: Directory that holds saved model.
