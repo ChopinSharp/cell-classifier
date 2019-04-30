@@ -1,6 +1,7 @@
 import cv2
 import os
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 data_dir = '../datasets/data0229_svm/WT'
@@ -25,8 +26,12 @@ def inspect_dataset():
     print(mean, std)
 
 
+def to_8_bit(image):
+    return (image / 256).clip(0, 255).astype(np.uint8)
+
+
 if __name__ == '__main__':
-    inspect_dataset()
+    pass
 
 
 

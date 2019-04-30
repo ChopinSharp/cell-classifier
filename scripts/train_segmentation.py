@@ -9,10 +9,7 @@ import numpy as np
 import copy
 import torch.utils.model_zoo as model_zoo
 from main.cell_segmentation import *
-import argparse
 import time
-import matplotlib.pyplot as plt
-from PIL import Image
 
 
 model_urls = {
@@ -354,81 +351,7 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio
     model.load_state_dict(best_model_info['model_dict'])
 
 
-def get_merged_tif(image_url, verbose=False):
-    image_stack = Image.open(image_url)
-    merged_image = np.zeros(image_stack.size, dtype=np.float32)
-    print(image_stack.n_frames, 'frames in', image_url)
-    for i in range(image_stack.n_frames):
-        image_stack.seek(i)
-        merged_image += np.fromstring(image_stack.tobytes(), dtype=np.uint16).reshape(*image_stack.size)
-    merged_image /= 65536
-    merged_image = merged_image.clip(0, 1)
-
-    return np.concatenate([merged_image[:, :, np.newaxis]] * 3, axis=2)
-
-
-def infer(model, folder_url):
-    files = os.listdir(folder_url)
-    total = len(files)
-    fig = plt.figure(figsize=[8, 6 * total])
-    model.eval()
-    for idx, name in enumerate(files):
-        image_url = os.path.join(folder_url, name)
-        # float_image = get_merged_tif(image_url, verbose=True)
-        image = (cv2.imread(image_url, cv2.IMREAD_ANYDEPTH) / 256).astype(np.uint8)
-        image_enhanced = cv2.equalizeHist(image)
-        float_image = image_enhanced.astype(np.float32) / 256
-        float_image = np.concatenate([float_image[:, :, np.newaxis]] * 3, axis=2)
-        inputs = torch.from_numpy(float_image.transpose((2, 0, 1)))
-        mean = inputs.mean()
-        std = inputs.std()
-        print('mean:', mean, 'std:', std)
-        inputs = inputs.sub(mean).div(std).unsqueeze(0).float()
-
-        preds = model(inputs).argmax(dim=1)
-        palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
-        pd = palette[preds.detach().cpu().numpy()[0]]
-
-        ax = fig.add_subplot(total, 2, 2 * idx + 1)
-        ax.set_title('Image')
-        ax.imshow(float_image)
-        ax = fig.add_subplot(total, 2, 2 * idx + 2)
-        ax.set_title('Pred.')
-        ax.imshow(pd)
-        fig.savefig('result.jpg')
-
-
-def visualize_model(model, loader):
-    model.eval()
-    palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
-    os.makedirs('tmp', exist_ok=True)
-    counter = 1
-    for idx, (sample, label) in enumerate(loader):
-        preds = model(sample).argmax(dim=1)
-        batch_size = sample.size()[0]
-        fig = plt.figure(figsize=[19.2, 10.8])
-        for i in range(batch_size):
-            gd = palette[label.detach().cpu().numpy()[i]]
-            pd = palette[preds.detach().cpu().numpy()[i]]
-            img = (255 * sample.detach().cpu().numpy()[i].transpose((1, 2, 0))).clip(0, 255).astype(np.uint8)
-            ax = fig.add_subplot(3, batch_size, i + 1)
-            ax.set_title('img')
-            ax.imshow(img)
-            ax = fig.add_subplot(3, batch_size, i + 1 + batch_size)
-            ax.set_title('gd')
-            ax.imshow(gd)
-            ax = fig.add_subplot(3, batch_size, i + 1 + 2*batch_size)
-            ax.set_title('pd')
-            ax.imshow(pd)
-        plt.savefig('tmp/%d.jpg' % counter)
-        counter += 1
-
-
-def main():
-    # parser = argparse.ArgumentParser()
-    # parser.add_argument('--model', default='UNet-Vgg', type=str, choices=['Unet-Squeeze', 'UNet-Vgg', 'SegNet'])
-    # args = parser.parse_args()
-
+if __name__ == '__main__':
     model = UNetVgg()
     validate_model(
         model,
@@ -452,17 +375,3 @@ def main():
     # torch.save(model.state_dict(), 'results/saved_models/SegNetVgg16.pt')
 
     print('\ndone')
-
-
-if __name__ == '__main__':
-    model = UNetVgg()
-    model.load_state_dict(torch.load('../results/saved_models/UNetVgg.pt'))
-    infer(model, '../datasets/segtest0426')
-    # #
-    # # loaders, _, _ = create_dataloaders('../datasets/data0229', 4)
-    # # visualize_model(model, loaders['test'])
-    # image = cv2.imread('../datasets/segtest0424/CZ22405 Z ASIX-WOUND-001_w0001.tif', )
-    #
-    # plt.imshow(image.astype(np.float) / 65536)
-    # plt.show()
-    # main()

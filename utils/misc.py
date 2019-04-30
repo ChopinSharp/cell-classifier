@@ -10,7 +10,7 @@ __all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'device', 'VisdomBo
 
 
 # Device to use in training
-device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 
 def opencv_loader(path):
