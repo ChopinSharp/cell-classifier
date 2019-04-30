@@ -1,15 +1,15 @@
-from utils import *
+from utils.misc import *
+from utils.ext_transforms import *
 import torch
 import torch.optim as optim
 import torch.nn as nn
-from torchvision import datasets
 import os
-import cv2
 import numpy as np
 import copy
 import torch.utils.model_zoo as model_zoo
 from main.cell_segmentation import *
 import time
+from PIL import Image
 
 
 model_urls = {
@@ -59,19 +59,46 @@ def set_parameter_requires_grad(model, phase):
         raise Exception('Model type is not supported.')
 
 
-class SegmentationImageFolder(datasets.DatasetFolder):
-    def __init__(self, root, linked_transforms=None):
-        super(SegmentationImageFolder, self).__init__(root, opencv_loader, ['.jpg', '.tif'])
-        self.linked_transforms = linked_transforms
+# class SegmentationImageFolder(datasets.DatasetFolder):
+#     def __init__(self, root, linked_transforms=None):
+#         super(SegmentationImageFolder, self).__init__(root, opencv_loader, ['.jpg', '.tif'])
+#         self.linked_transforms = linked_transforms
+#
+#     def __getitem__(self, index):
+#         img, lbl = super(SegmentationImageFolder, self).__getitem__(index)
+#         _, lbl = cv2.threshold(img, 0, lbl + 1, cv2.THRESH_OTSU | cv2.THRESH_BINARY)
+#
+#         if self.linked_transforms is not None:
+#             img, lbl = self.linked_transforms(img, lbl)
+#
+#         return img, lbl
 
-    def __getitem__(self, index):
-        img, lbl = super(SegmentationImageFolder, self).__getitem__(index)
-        _, lbl = cv2.threshold(img, 0, lbl + 1, cv2.THRESH_OTSU | cv2.THRESH_BINARY)
 
-        if self.linked_transforms is not None:
-            img, lbl = self.linked_transforms(img, lbl)
+class SegmentationImageFolder(torch.utils.data.Dataset):
+    def __init__(self, data_dir, anno_dir, ext_transforms=None, enable_check=True):
+        self.data_dir = data_dir
+        self.anno_dir = anno_dir
+        self.ext_transforms = ext_transforms
+        self.data_files = os.listdir(self.data_dir)
+        self.anno_files = os.listdir(self.anno_dir)
+        assert len(self.data_files) == len(self.anno_files), 'Invalid dataset for segmentation'
+        self.data_files.sort()
+        self.anno_files.sort()
+        if enable_check:
+            for data, anno in zip(self.data_files, self.anno_files):
+                assert data == anno, 'Invalid dataset for segmentation'
 
-        return img, lbl
+    def __len__(self):
+        return len(self.data_files)
+
+    def __getitem__(self, idx):
+        data_path = os.path.join(self.data_dir, self.data_files[idx])
+        anno_path = os.path.join(self.anno_dir, self.anno_files[idx])
+        with open(data_path, 'rb') as f:
+            data = Image.open(f).convert('RGB')
+        with open(anno_path, 'rb') as f:
+            anno = Image.open(f).convert('RGB')
+        return data, anno
 
 
 class IoUMetric:
@@ -99,12 +126,13 @@ def get_scaled_size(size):
     return size[0] // 32 * 32, size[1] // 32 * 32
 
 
-def create_dataloaders(data_dir, batch_size, img_size=(400, 600), verbose=True):
+def create_dataloaders(base_dir, batch_size, img_size=(400, 600)):
     """Create datasets and dataloaders.
 
     Args:
-        data_dir: Top directory of data.
+        base_dir: Top directory of dataset.
         batch_size: Batch size.
+        img_size: Original image size.
 
     Returns:
         dataloaders: A dictionary that holds dataloaders for training, validating and testing.
@@ -117,36 +145,38 @@ def create_dataloaders(data_dir, batch_size, img_size=(400, 600), verbose=True):
     print('* val and test images are scaled to', scaled_size)
 
     # Get dataset mean and std
-    dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir)
+    dataset_mean, dataset_std = estimate_dataset_mean_and_std(os.path.join(base_dir, 'data'))
 
     # Data augmentation and normalization for training
     # Just normalization for validation
-    data_transforms = {
-        'train': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtRandomRotation(45),
-            opencv_transforms.ExtRandomCrop(224),
-            opencv_transforms.ExtRandomHorizontalFlip(),
-            opencv_transforms.ExtRandomVerticalFlip(),
-            opencv_transforms.ExtToTensor(),
-            opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
+    transforms = {
+        'train': ExtCompose([
+            ExtColorJitter(brightness=0.5, saturation=0.5),
+            ExtRandomRotation(45, resample=Image.BILINEAR),
+            ExtRandomCrop(224),
+            ExtRandomHorizontalFlip(),
+            ExtRandomVerticalFlip(),
+            ExtToTensor(),
+            ExtNormalize(dataset_mean, dataset_std)
         ]),
-        'val': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtResize(scaled_size),
-            opencv_transforms.ExtToTensor(),
-            opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
+        'val': ExtCompose([
+            ExtResize(scaled_size),
+            ExtToTensor(),
+            ExtNormalize(dataset_mean, dataset_std)
         ]),
-        'test': opencv_transforms.ExtCompose([
-            opencv_transforms.ExtResize(scaled_size),
-            opencv_transforms.ExtToTensor(),
-            opencv_transforms.ExtNormalize(dataset_mean, dataset_std)
+        'test': ExtCompose([
+            ExtResize(scaled_size),
+            ExtToTensor(),
+            ExtNormalize(dataset_mean, dataset_std)
         ])
     }
 
     # Create training and validation datasets
     image_datasets = {
         x: SegmentationImageFolder(
-            os.path.join(data_dir, x),
-            linked_transforms=data_transforms[x]
+            os.path.join(base_dir, 'data', x),
+            os.path.join(base_dir, 'anno', x),
+            ext_transforms=transforms[x]
         )
         for x in ['train', 'val', 'test']
     }
@@ -351,7 +381,7 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio
     model.load_state_dict(best_model_info['model_dict'])
 
 
-if __name__ == '__main__':
+def main():
     model = UNetVgg()
     validate_model(
         model,
@@ -375,3 +405,7 @@ if __name__ == '__main__':
     # torch.save(model.state_dict(), 'results/saved_models/SegNetVgg16.pt')
 
     print('\ndone')
+
+
+if __name__ == '__main__':
+    main()

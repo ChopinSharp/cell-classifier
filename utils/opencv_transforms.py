@@ -4,6 +4,7 @@ import math
 import numpy as np
 import torch
 import torchvision.transforms.functional as F
+import torchvision
 
 
 class ToNumpy:
@@ -229,83 +230,6 @@ class ExtResize:
         return resized_img, resized_lbl
 
 
-class ExtRandomResizedCrop:
-    """
-    Crop the given PIL Image to random size and aspect ratio.
-    A crop of random size (default: of 0.08 to 1.0) of the original size and a random
-    aspect ratio (default: of 3/4 to 4/3) of the original aspect ratio is made. This crop
-    is finally resized to given size.
-    This is popularly used to train the Inception networks.
-    """
-
-    def __init__(self, size, scale=(0.1, 1.0), ratio=(5. / 6., 6. / 5.), interpolation=cv2.INTER_LINEAR):
-        """
-        :param size: expected output size of each edge
-        :param scale: range of size of the origin size cropped
-        :param ratio: range of aspect ratio of the origin aspect ratio cropped
-        :param interpolation: Default: cv2.INTER_LINEAR
-        """
-        self.size = (size, size)
-        self.interpolation = interpolation
-        self.scale = scale
-        self.ratio = ratio
-
-    @staticmethod
-    def get_params(img, scale, ratio):
-        """
-        Get parameters for crop for a random sized crop.
-        :param img: (numpy.ndarray) Image to be cropped.
-        :param scale: (tuple) range of size of the origin size cropped.
-        :param ratio: (tuple) range of aspect ratio of the origin aspect ratio cropped.
-        :returns tuple: params (i, j, h, w) to be passed to crop for a random sized crop.
-        """
-        area = img.shape[0] * img.shape[1]
-        init_ratio = img.shape[1] / img.shape[0]
-        ratio = list(map(lambda x: x * init_ratio, ratio))
-
-        # print(ratio)
-
-        w, h = None, None  # dummy line to suppress Pycharm warning ...
-
-        for attempt in range(10):
-            target_area = random.uniform(*scale) * area
-            aspect_ratio = random.uniform(*ratio)
-
-            w = int(round(math.sqrt(target_area * aspect_ratio)))
-            h = int(round(math.sqrt(target_area / aspect_ratio)))
-
-            # I don't really understand this if ...
-            # if random.random() < 0.5 and min(ratio) <= (h / w) <= max(ratio):
-            #     w, h = h, w
-
-            if w <= img.shape[1] and h <= img.shape[0]:
-                i = random.randint(0, img.shape[0] - h)
-                j = random.randint(0, img.shape[1] - w)
-
-                # print(' - Resized crop done')
-
-                return i, j, h, w
-
-        # Fallback
-
-        # print(' - Resized crop failed with w =', w, 'h =', h)
-
-        w = min(img.shape[0], img.shape[1])
-        i = (img.shape[1] - w) // 2
-        j = (img.shape[0] - w) // 2
-        return i, j, w, w
-
-    def __call__(self, img, lbl):
-        """
-        :param img: (numpy.ndarray) Image to be cropped and resized.
-        :return: (numpy.ndarray) Randomly cropped and resized image.
-        """
-        i, j, h, w = self.get_params(img, self.scale, self.ratio)
-        scaled_img = cv2.resize(img[i:i+h, j:j+w], self.size, interpolation=cv2.INTER_LINEAR)
-        scaled_lbl = cv2.resize(lbl[i:i+h, j:j+w], self.size, interpolation=cv2.INTER_NEAREST)
-        return scaled_img, scaled_lbl
-
-
 class ExtRandomCrop:
     def __init__(self, size=224):
         self.size = size
@@ -426,12 +350,6 @@ class ExtNormalize(object):
         self.std = std
 
     def __call__(self, img, lbl):
-        """
-        Args:
-            tensor (Tensor): Tensor image of size (C, H, W) to be normalized.
-        Returns:
-            Tensor: Normalized Tensor image.
-        """
         return F.normalize(img, self.mean, self.std), lbl
 
     def __repr__(self):
@@ -447,6 +365,15 @@ class ExtCompose:
         for t in self.transforms:
             img, lbl = t(img, lbl)
         return img, lbl
+
+
+class ExtColorJitter:
+
+    def __init__(self, brightness=0, contrast=0, saturation=0, hue=0):
+        self.transform = torchvision.transforms.ColorJitter(brightness, contrast, saturation, hue)
+
+    def __call__(self, img, lbl):
+        return self.transform(img), lbl
 
 
 if __name__ == '__main__':
@@ -533,7 +460,6 @@ if __name__ == '__main__':
                 # opencv_transforms.ExtRandomHorizontalFlip(0.99),
                 # opencv_transforms.ExtRandomVerticalFlip(0.99),
                 # opencv_transforms.ExtRandomRotation(90),
-                ExtRandomResizedCrop(200)
             ])
         )
         loader = torch.utils.data.DataLoader(dataset, batch_size=1)
