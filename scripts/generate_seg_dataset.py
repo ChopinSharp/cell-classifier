@@ -8,7 +8,7 @@ import os
 palette = np.array([[0, 0, 0], [0, 0, 255], [0, 255, 0], [255, 0, 0]])
 
 
-def main():
+def main1():
     parser = argparse.ArgumentParser()
     parser.add_argument('--input-dir', type=str, required=True, help='input directory')
     parser.add_argument('--output-dir', type=str, required=True, help='output directory')
@@ -32,5 +32,40 @@ def main():
             cv2.imwrite(anno_path, anno)
 
 
+def adjust_contrast(image, saturation=0.35):
+    image_min, image_max = image.min(), image.max()
+    hist, _ = np.histogram(image, np.arange(image_min, image_max + 2), density=True)
+    i, j = 0, hist.shape[0] - 1
+    cur_sat = 0.
+    while cur_sat < saturation / 100:
+        if hist[i] < hist[j]:
+            cur_sat += hist[i]
+            i += 1
+        else:
+            cur_sat += hist[j]
+            j -= 1
+    low, high = i + image_min, j + image_min
+    image_transformed = (image.astype(np.float32) - low) * (255 / (high - low))
+    return image_transformed.clip(0, 255).astype(np.uint8)
+
+
+def main2():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--input-dir', type=str, required=True, help='input directory')
+    parser.add_argument('--output-dir', type=str, required=True, help='output directory')
+    args = parser.parse_args()
+    for folder in os.listdir(args.input_dir):
+        folder_path = os.path.join(args.input_dir, folder)
+        output_folder = os.path.join(args.output_dir, folder)
+        os.makedirs(output_folder, exist_ok=True)
+        for name in os.listdir(folder_path):
+            image_url = os.path.join(folder_path, name)
+            print('processing', image_url)
+            image = cv2.imread(image_url, cv2.IMREAD_ANYDEPTH)
+            image_enhanced = adjust_contrast(image, 0.35)
+            output_url = os.path.join(output_folder, name)
+            cv2.imwrite(output_url, image_enhanced)
+
+
 if __name__ == '__main__':
-    main()
+    main2()

@@ -151,9 +151,10 @@ def create_dataloaders(base_dir, batch_size, img_size=(400, 600)):
     # Just normalization for validation
     transforms = {
         'train': ExtCompose([
-            ExtColorJitter(brightness=0.99, saturation=0.7),
+            ExtColorJitter(brightness=0.5, saturation=0.5),
             ExtRandomRotation(45, resample=Image.BILINEAR),
-            ExtRandomCrop(224),
+            # ExtRandomCrop(224),
+            ExtRandomResizedCrop(224, scale=(0.5, 1.2)),
             ExtRandomHorizontalFlip(),
             ExtRandomVerticalFlip(),
             ExtToTensor(),
@@ -316,7 +317,7 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
     return val_iou_history, loss_history
 
 
-def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio=1/10, batch_size=8, verbose=True):
+def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio=1/10, batch_size=8, verbose=True):
     print('Validating', repr(model), '...')
 
     # Move model to gpu if possible
@@ -327,13 +328,14 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio
     metric = IoUMetric()
 
     # Prepare dataset
-    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229_seg', batch_size)
+    dataloaders, dataset_mean, dataset_std = create_dataloaders(data_dir, batch_size)
 
     # Validate model
-    best_model_info = {'lr': 0., 'wd': 0., 'val_iou': 0., 'model_dict': None}
+    best_model_info = {'lr': 0., 'wd': 0., 'val_iou': 0., 'model_dict': None, 'timestamp': None}
     since = time.time()
     for lr in lr_candidates:
         for wd in wd_candidates:
+            start_time = time.ctime()
             print("* Tuning lr=%g, wd=%g" % (lr, wd))
             # Construct optimizer
             optimizers = {
@@ -356,7 +358,8 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio
             }
             # Train model
             val_iou_history, loss_history = train_model(model, criterion, metric, optimizers, dataloaders, epochs,
-                                                        verbose=verbose, viz_info='%s lr=%g wd=%g' % (repr(model),lr, wd))
+                                                        verbose=verbose,
+                                                        viz_info='%s lr=%g wd=%g %s' % (repr(model), lr, wd, start_time))
             # Save best model information
             this_val_iou = max(val_iou_history)
             if this_val_iou > best_model_info['val_iou']:
@@ -364,6 +367,7 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio
                 best_model_info['wd'] = wd
                 best_model_info['val_iou'] = this_val_iou
                 best_model_info['model_dict'] = copy.deepcopy(model.state_dict())
+                best_model_info['timestamp'] = start_time
     time_elapsed = time.time() - since
     print('* Validation takes %d min, %d sec' % (time_elapsed // 60, time_elapsed % 60))
     print('* Found best model at lr=%(lr)g, wd=%(wd)g, val_iou=%(val_iou)g\n' % best_model_info)
@@ -379,12 +383,14 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio
 
     # Reload best model
     model.load_state_dict(best_model_info['model_dict'])
+    return best_model_info['timestamp']
 
 
 def main():
     model = UNetVgg()
-    validate_model(
+    timestamp = validate_model(
         model,
+        '../datasets/data0229_seg_enhanced',
         # np.linspace(5e-6, 1e-4, 6),
         # np.linspace(1e-6, 1e-3, 6),
         [4e-5],
@@ -393,7 +399,7 @@ def main():
         phase_2_lr_ratio=1 / 8,
         batch_size=16
     )
-    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/UNetVgg %s.pt' % time.ctime()))
+    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/UNetVgg %s.pt' % timestamp))
     # model2 = SegNetVgg16()
     # validate_model(
     #     model2,

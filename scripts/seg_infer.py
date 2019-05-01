@@ -134,5 +134,5 @@ def visualize_model(model, loader):
 if __name__ == '__main__':
     _model = UNetVgg()
     # _model.to('cuda:0')
-    _model.load_state_dict(torch.load('../results/saved_models/UNetVgg Wed May  1 00:26:55 2019.pt'))
-    infer(_model, '../datasets/segtest0424')
+    _model.load_state_dict(torch.load('../results/saved_models/UNetVgg-augmented.pt'))
+    infer(_model, '../datasets/segtest0425')
