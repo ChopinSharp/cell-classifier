@@ -1,5 +1,7 @@
-from utils import *
 from main.cell_classifier import *
+from utils import opencv_transforms
+from utils.misc import opencv_loader, using_device, expand_subdir, estimate_dataset_mean_and_std
+from utils.temperature_scaling import compute_temperature
 import torch
 from torch import nn, optim
 from torchvision import transforms, datasets
@@ -26,7 +28,7 @@ def create_dataloaders(data_dir, input_size, batch_size):
 
     """
     # Get dataset mean and std
-    dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir, input_size)
+    dataset_mean, dataset_std = estimate_dataset_mean_and_std(expand_subdir(data_dir), input_size)
 
     # Data augmentation and normalization for training
     # Just normalization for validation
@@ -115,8 +117,8 @@ def train_model(model, dataloaders, criterion, optimizer, num_epochs, is_incepti
 
             # Iterate over data.
             for inputs, labels in dataloaders[phase]:
-                inputs = inputs.to(device)
-                labels = labels.to(device)
+                inputs = inputs.to(using_device)
+                labels = labels.to(using_device)
 
                 # Zero the parameter gradients
                 optimizer.zero_grad()
@@ -180,8 +182,8 @@ def test_model(model, dataloader, is_inception=False):
 
     # Iterate over data.
     for inputs, labels in iter(dataloader):
-        inputs = inputs.to(device)
-        labels = labels.to(device)
+        inputs = inputs.to(using_device)
+        labels = labels.to(using_device)
 
         # forward, track history if only in train
         with torch.no_grad():
@@ -260,7 +262,7 @@ def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir='.
             model, params_to_update = initialize_model(model_name, num_classes, feature_extract)
 
             # Send the model to GPU
-            model = model.to(device)
+            model = model.to(using_device)
 
             # Setup optimizer
             optimizer = optim.Adam(

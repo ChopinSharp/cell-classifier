@@ -6,22 +6,26 @@ from utils import opencv_transforms
 from visdom import Visdom
 import numpy as np
 
-__all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'device', 'VisdomBoard']
+__all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'using_device', 'VisdomBoard', 'expand_subdir']
 
 
 # Device to use in training
-device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+using_device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
 
 
 def opencv_loader(path):
     return cv2.imread(path, cv2.IMREAD_ANYDEPTH)
 
 
-def estimate_dataset_mean_and_std(data_dir, input_size=None):
+def expand_subdir(folder):
+    return [os.path.join(folder, name) for name in os.listdir(folder)]
+
+
+def estimate_dataset_mean_and_std(data_dirs, input_size=None):
     """Calculate dataset mean and standard deviation.
 
     Args:
-        data_dir: Top directory of data.
+        data_dirs: List of image folders to estimate.
         input_size: Expected input size.
 
     Returns:
@@ -32,19 +36,14 @@ def estimate_dataset_mean_and_std(data_dir, input_size=None):
     # Load all samples into a single dataset
     if input_size:
         transform = transforms.Compose([
-            opencv_transforms.Resize(input_size),
-            opencv_transforms.ToTensor()
+            transforms.Resize((input_size, input_size)),
+            transforms.ToTensor()
         ])
     else:
-        transform = opencv_transforms.ToTensor()
+        transform = transforms.ToTensor()
     dataset = torch.utils.data.ConcatDataset([
-        datasets.DatasetFolder(
-            os.path.join(data_dir, x),
-            opencv_loader,
-            ['jpg', 'tif'],
-            transform=transform
-        )
-        for x in ['train', 'val', 'test']
+        datasets.ImageFolder(data_dir, transform=transform)
+        for data_dir in data_dirs
     ])
 
     # Construct loader, trim off remainders

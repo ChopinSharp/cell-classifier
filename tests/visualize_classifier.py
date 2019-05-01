@@ -3,7 +3,7 @@ import os
 import matplotlib.pyplot as plt
 from torchvision import transforms, datasets
 from main.cell_classifier import available_models_input_size, initialize_model
-from utils import *
+from utils.misc import estimate_dataset_mean_and_std, expand_subdir
 
 
 def compute_saliency_maps(model, inputs, labels):
@@ -88,7 +88,7 @@ def visualize_model(model_dir='../results/saved_models', data_dir='../datasets/d
 
     # Get dataset mean and std
     input_size = available_models_input_size[model_name]
-    dataset_mean, dataset_std = estimate_dataset_mean_and_std(data_dir, input_size)
+    dataset_mean, dataset_std = estimate_dataset_mean_and_std(expand_subdir(data_dir), input_size)
 
     # Resize and normalize for input, only resize for show.
     data_transforms = {

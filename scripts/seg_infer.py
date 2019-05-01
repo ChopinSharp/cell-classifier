@@ -74,8 +74,8 @@ def infer(model, folder_url):
         image_url = os.path.join(folder_url, name)
         image = cv2.imread(image_url, cv2.IMREAD_ANYDEPTH)
         ori_image = (image / 256).astype(np.uint8)
-        image_enhanced = merge_tif(image_url) # adjust_contrast(image, 0.35)
-        float_image = image_enhanced.astype(np.float32) / 256
+        image_enhanced = adjust_contrast(image, 0.35)  # merge_tif(image_url)
+        float_image = ori_image.astype(np.float32) / 256
         float_image = pad_channels(float_image)
         inputs = torch.from_numpy(float_image.transpose((2, 0, 1)))
         mean = inputs.mean()
@@ -134,5 +134,5 @@ def visualize_model(model, loader):
 if __name__ == '__main__':
     _model = UNetVgg()
     # _model.to('cuda:0')
-    _model.load_state_dict(torch.load('../../mitochondrial/results/saved_models/UNetVgg.pt'))
-    infer(_model, '../datasets/segtest0425')
+    _model.load_state_dict(torch.load('../results/saved_models/UNetVgg Wed May  1 00:26:55 2019.pt'))
+    infer(_model, '../datasets/segtest0424')

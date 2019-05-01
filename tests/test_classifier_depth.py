@@ -74,7 +74,7 @@ def main():
         model = SqueezeNetOfDepth(depth)
 
         # Send the model to GPU
-        model = model.to(device)
+        model = model.to(using_device)
 
         # Setup optimizer
         optimizer = optim.Adam(

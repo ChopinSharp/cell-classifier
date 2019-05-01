@@ -1,9 +1,9 @@
 import random
 import torchvision.transforms.functional as F
-from torchvision.transforms import ColorJitter
+from torchvision.transforms import ColorJitter, ToPILImage
 import numbers
 from PIL import Image
-from collections import Iterable
+from collections.abc import Iterable
 import numpy as np
 import torch
 
@@ -71,7 +71,7 @@ class ExtRandomVerticalFlip:
 
 class ExtColorJitter:
 
-    def __init__(self, brightness=0, contrast=0, saturation=0, hue=0):
+    def __init__(self, brightness=0., contrast=0., saturation=0., hue=0.):
         self.transform = ColorJitter(brightness, contrast, saturation, hue)
 
     def __call__(self, img, lbl):
@@ -141,12 +141,11 @@ class ExtToTensor:
 
     @staticmethod
     def _lbl_to_tensor(lbl):
-        img = np.array(lbl, np.uint8, copy=False)
-        bg_mask = img.sum(axis=2) == 0
-        tensor = img.argmax(axis=2) + 1
-        
-
-        return torch.from_numpy(lbl).type(dtype=torch.long)
+        lbl_array = np.array(lbl, dtype=np.uint8, copy=False)
+        padding = np.ones((lbl_array.shape[0], lbl_array.shape[1], 1), dtype=np.uint8) * 128
+        lbl_padded = np.concatenate((padding, lbl_array), axis=2)
+        true_label = lbl_padded.argmax(axis=2)
+        return torch.from_numpy(true_label).type(dtype=torch.long)
 
     def __call__(self, pic, lbl):
         return F.to_tensor(pic), self._lbl_to_tensor(lbl)
@@ -210,3 +209,53 @@ class ExtRandomCrop:
         wi = random.randint(0, img.size[0] - self.size)
         crop_cfg = (wi, hi, wi + self.size, hi + self.size)
         return img.crop(crop_cfg), lbl.crop(crop_cfg)
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(size={0})'.format(self.size)
+
+
+class ExtToPILImage:
+    def __init__(self):
+        self.transform = ToPILImage()
+        self.palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
+
+    def __call__(self, img, lbl):
+        palette = np.array([[0, 0, 0], [0, 0, 255], [0, 255, 0], [255, 0, 0]])
+        lbl_img = self.palette[lbl.detach().numpy()].astype(np.uint8)
+        return self.transform(img), Image.fromarray(lbl_img, mode='RGB')
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
+
+
+if __name__ == '__main__':
+    import matplotlib.pyplot as plt
+    from scripts.train_segmentation import SegmentationImageFolder
+    # dataset = SegmentationImageFolder(
+    #     '../datasets/data0229_seg/data/val',
+    #     '../datasets/data0229_seg/anno/val',
+    #     ext_transforms=ExtCompose([
+    #         ExtColorJitter(0.5, 0.5),
+    #         ExtToTensor()
+    #     ])
+    # )
+    # loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=1)
+    # t = ExtToPILImage()
+    # for idx, (imgs, lbls) in enumerate(loader):
+    #     img, lbl = t(imgs[0], lbls[0])
+    #     plt.subplot(121)
+    #     plt.imshow(img)
+    #     plt.subplot(122)
+    #     plt.imshow(lbl)
+    #     plt.show()
+    #     if idx == 10:
+    #         break
+    t = ExtColorJitter(0.9, 0.9)
+    img = Image.open('../datasets/data0229_seg/data/test/1 (2).png')
+    lbl = Image.open('../datasets/data0229_seg/anno/test/1 (2).png')
+    plt.subplot(121)
+    plt.imshow(img)
+    img_t, _ = t(img, lbl)
+    plt.subplot(122)
+    plt.imshow(img_t)
+    plt.show()

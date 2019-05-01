@@ -19,10 +19,10 @@ def show_threshold(path):
 
 
 def inspect_dataset():
-    from utils.misc import estimate_dataset_mean_and_std
-    mean, std = estimate_dataset_mean_and_std('../datasets/data0229', 300)
+    from utils.misc import estimate_dataset_mean_and_std, expand_subdir
+    mean, std = estimate_dataset_mean_and_std(expand_subdir('../datasets/data0229'), 300)
     print(mean, std)
-    mean, std = estimate_dataset_mean_and_std('../datasets/data0318', 300)
+    mean, std = estimate_dataset_mean_and_std(expand_subdir('../datasets/data0318'), 300)
     print(mean, std)
 
 

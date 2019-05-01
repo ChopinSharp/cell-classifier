@@ -84,9 +84,9 @@ class SegmentationImageFolder(torch.utils.data.Dataset):
         assert len(self.data_files) == len(self.anno_files), 'Invalid dataset for segmentation'
         self.data_files.sort()
         self.anno_files.sort()
-        if enable_check:
+        if enable_check: # extension is neglected
             for data, anno in zip(self.data_files, self.anno_files):
-                assert data == anno, 'Invalid dataset for segmentation'
+                assert data[:data.rfind('.')] == anno[:anno.rfind('.')], 'Invalid dataset for segmentation'
 
     def __len__(self):
         return len(self.data_files)
@@ -98,7 +98,7 @@ class SegmentationImageFolder(torch.utils.data.Dataset):
             data = Image.open(f).convert('RGB')
         with open(anno_path, 'rb') as f:
             anno = Image.open(f).convert('RGB')
-        return data, anno
+        return self.ext_transforms(data, anno)
 
 
 class IoUMetric:
@@ -145,13 +145,13 @@ def create_dataloaders(base_dir, batch_size, img_size=(400, 600)):
     print('* val and test images are scaled to', scaled_size)
 
     # Get dataset mean and std
-    dataset_mean, dataset_std = estimate_dataset_mean_and_std(os.path.join(base_dir, 'data'))
+    dataset_mean, dataset_std = estimate_dataset_mean_and_std([os.path.join(base_dir, 'data')])
 
     # Data augmentation and normalization for training
     # Just normalization for validation
     transforms = {
         'train': ExtCompose([
-            ExtColorJitter(brightness=0.5, saturation=0.5),
+            ExtColorJitter(brightness=0.99, saturation=0.7),
             ExtRandomRotation(45, resample=Image.BILINEAR),
             ExtRandomCrop(224),
             ExtRandomHorizontalFlip(),
@@ -201,8 +201,8 @@ def test_model(model, loader):
     running_iou_avg = 0.
 
     for inputs, labels in loader:
-        inputs = inputs.to(device)
-        labels = labels.to(device)
+        inputs = inputs.to(using_device)
+        labels = labels.to(using_device)
         with torch.no_grad():
             outputs = model(inputs)
         preds = outputs.argmax(dim=1)
@@ -262,8 +262,8 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
 
                 # Iterate over data.
                 for inputs, labels in dataloaders[inner_phase]:
-                    inputs = inputs.to(device)
-                    labels = labels.to(device)
+                    inputs = inputs.to(using_device)
+                    labels = labels.to(using_device)
 
                     # Zero the parameter gradients
                     optimizers[outer_phase].zero_grad()
@@ -320,14 +320,14 @@ def validate_model(model, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio
     print('Validating', repr(model), '...')
 
     # Move model to gpu if possible
-    model = model.to(device)
+    model = model.to(using_device)
 
     # Set up criterion and metric
     criterion = nn.CrossEntropyLoss()
     metric = IoUMetric()
 
     # Prepare dataset
-    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229', batch_size)
+    dataloaders, dataset_mean, dataset_std = create_dataloaders('../datasets/data0229_seg', batch_size)
 
     # Validate model
     best_model_info = {'lr': 0., 'wd': 0., 'val_iou': 0., 'model_dict': None}
@@ -393,7 +393,7 @@ def main():
         phase_2_lr_ratio=1 / 8,
         batch_size=16
     )
-    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/UNetVgg.pt'))
+    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/UNetVgg %s.pt' % time.ctime()))
     # model2 = SegNetVgg16()
     # validate_model(
     #     model2,

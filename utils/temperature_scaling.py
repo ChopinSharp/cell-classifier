@@ -1,7 +1,7 @@
 import torch
 from torch import nn, optim
 from torch.nn import functional as F
-from utils import device
+from utils import using_device
 
 
 def compute_temperature(model, val_loader=None, verbose=False):
@@ -55,7 +55,7 @@ def compute_temperature(model, val_loader=None, verbose=False):
         print('+ Before temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_before_scaling, ece_before_scaling))
         print('+ After temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_after_scaling, ece_after_scaling))
 
-    model.to(device)
+    model.to(using_device)
     return opt_temperature
 
 
