@@ -75,7 +75,7 @@ def infer(model, folder_url):
         image = cv2.imread(image_url, cv2.IMREAD_ANYDEPTH)
         ori_image = (image / 256).astype(np.uint8)
         image_enhanced = adjust_contrast(image, 0.35)  # merge_tif(image_url)
-        float_image = ori_image.astype(np.float32) / 256
+        float_image = image_enhanced.astype(np.float32) / 256
         float_image = pad_channels(float_image)
         inputs = torch.from_numpy(float_image.transpose((2, 0, 1)))
         mean = inputs.mean()
@@ -131,8 +131,16 @@ def visualize_model(model, loader):
         counter += 1
 
 
+def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model', type=str, required=True, help='path to model')
+    parser.add_argument('--input', type=str, required=True, help='input directory')
+    args = parser.parse_args()
+    model = UNetVgg()
+    model.load_state_dict(torch.load(os.path.join('../results/saved_models', args.model)))
+    infer(model, args.input)
+
+
 if __name__ == '__main__':
-    _model = UNetVgg()
-    # _model.to('cuda:0')
-    _model.load_state_dict(torch.load('../results/saved_models/UNetVgg-augmented.pt'))
-    infer(_model, '../datasets/segtest0425')
+    main()
