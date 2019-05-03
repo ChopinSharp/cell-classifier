@@ -10,6 +10,7 @@ import torch.utils.model_zoo as model_zoo
 from main.cell_segmentation import *
 import time
 from PIL import Image
+from visdom import Visdom
 
 
 model_urls = {
@@ -21,11 +22,11 @@ model_urls = {
 
 def load_pretrained_weights(model):
     pretrained_model = None
-    if isinstance(model, UNetSqueeze):
-        pretrained_model = model_zoo.load_url(model_urls['squeezenet1_0'])
+    if isinstance(model, UNetVggVar):
+        pretrained_model = model_zoo.load_url(model_urls['vgg11_bn'])
     elif isinstance(model, UNetVgg):
         pretrained_model = model_zoo.load_url(model_urls['vgg11_bn'])
-    elif isinstance(model, SegNetVgg16):
+    elif isinstance(model, SegNetVgg):
         pretrained_model = model_zoo.load_url(model_urls['vgg16_bn'])
 
     model.features.load_state_dict({
@@ -46,32 +47,17 @@ def initialize_weights(*model_list):
 
 
 def set_parameter_requires_grad(model, phase):
-    if isinstance(model, UNetSqueeze):
+    if isinstance(model, UNetVggVar):
         for name, param in model.features.named_parameters():
-            param.requires_grad = (phase == 'Phase 2' and int(name.split('.')[0]) >= 7)
+            param.requires_grad = (phase == 'Phase 2')  # and int(name.split('.')[0]) >= 8) # 15
     elif isinstance(model, UNetVgg):
         for name, param in model.features.named_parameters():
             param.requires_grad = (phase == 'Phase 2')# and int(name.split('.')[0]) >= 8) # 15
-    elif isinstance(model, SegNetVgg16):
+    elif isinstance(model, SegNetVgg):
         for name, param in model.features.named_parameters():
             param.requires_grad = (phase == 'Phase 2')# and int(name.split('.')[0]) >= 14) # 24
     else:
         raise Exception('Model type is not supported.')
-
-
-# class SegmentationImageFolder(datasets.DatasetFolder):
-#     def __init__(self, root, linked_transforms=None):
-#         super(SegmentationImageFolder, self).__init__(root, opencv_loader, ['.jpg', '.tif'])
-#         self.linked_transforms = linked_transforms
-#
-#     def __getitem__(self, index):
-#         img, lbl = super(SegmentationImageFolder, self).__getitem__(index)
-#         _, lbl = cv2.threshold(img, 0, lbl + 1, cv2.THRESH_OTSU | cv2.THRESH_BINARY)
-#
-#         if self.linked_transforms is not None:
-#             img, lbl = self.linked_transforms(img, lbl)
-#
-#         return img, lbl
 
 
 class SegmentationImageFolder(torch.utils.data.Dataset):
@@ -153,8 +139,7 @@ def create_dataloaders(base_dir, batch_size, img_size=(400, 600)):
         'train': ExtCompose([
             ExtColorJitter(brightness=0.5, saturation=0.5),
             ExtRandomRotation(45, resample=Image.BILINEAR),
-            # ExtRandomCrop(224),
-            ExtRandomResizedCrop(224, scale=(0.5, 1.2)),
+            ExtRandomCrop(224),
             ExtRandomHorizontalFlip(),
             ExtRandomVerticalFlip(),
             ExtToTensor(),
@@ -223,7 +208,7 @@ def test_model(model, loader):
     return test_iou_0, test_iou_1, test_iou_2, test_iou_3, test_iou_avg
 
 
-def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbose=True, viz_info=None, port=2337):
+def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbose=True, viz_info=None, port=using_port):
 
     # Initialize weights
     initialize_weights(model.decoder)
@@ -357,9 +342,10 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
                 )
             }
             # Train model
+            viz_info = '{0} lr={1:e} wd={2:e} %{3}'.format(repr(model), lr, wd, start_time)
             val_iou_history, loss_history = train_model(model, criterion, metric, optimizers, dataloaders, epochs,
                                                         verbose=verbose,
-                                                        viz_info='%s lr=%g wd=%g %s' % (repr(model), lr, wd, start_time))
+                                                        viz_info=viz_info)
             # Save best model information
             this_val_iou = max(val_iou_history)
             if this_val_iou > best_model_info['val_iou']:
@@ -374,12 +360,10 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
 
     # Test model
     t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg = test_model(model, dataloaders['test'])
-    print('Test results:')
-    print('iou_0: %f' % t_iou_0)
-    print('iou_1: %f' % t_iou_1)
-    print('iou_2: %f' % t_iou_2)
-    print('iou_3: %f' % t_iou_3)
-    print('iou_avg: %f' % t_iou_avg)
+    test_result = 'Test results:\n  iou_0: %f\n  iou_1: %f\n  iou_2: %f\n  iou_3: %f\n  iou_avg: %f' % \
+                  (t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg)
+    print(test_result)
+    Visdom(port=using_port).text(test_result, win='[{}] Test Result'.format(best_model_info['timestamp']))
 
     # Reload best model
     model.load_state_dict(best_model_info['model_dict'])
@@ -387,7 +371,7 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
 
 
 def main():
-    model = UNetVgg()
+    model = UNetVggVar()
     timestamp = validate_model(
         model,
         '../datasets/data0229_seg_enhanced',
@@ -395,21 +379,11 @@ def main():
         # np.linspace(1e-6, 1e-3, 6),
         [4e-5],
         [2e-5],
-        {'Phase 1': 100, 'Phase 2': 100},
+        {'Phase 1': 100, 'Phase 2': 150},
         phase_2_lr_ratio=1 / 8,
         batch_size=16
     )
-    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/UNetVgg %s.pt' % timestamp))
-    # model2 = SegNetVgg16()
-    # validate_model(
-    #     model2,
-    #     np.linspace(5e-6, 1e-4, 6),
-    #     np.linspace(1e-7, 1e-4, 6),
-    #     {'Phase 1': 50, 'Phase 2': 50},
-    #     phase_2_lr_ratio=1 / 5
-    # )
-    # torch.save(model.state_dict(), 'results/saved_models/SegNetVgg16.pt')
-
+    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))
     print('\ndone')
 
 

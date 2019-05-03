@@ -1,62 +1,8 @@
 import torch
 import torch.nn as nn
-from torchvision import models
-import warnings
 
 
-__all__ = ['UNetSqueeze', 'UNetVgg', 'SegNetVgg16']
-
-
-class _UNetSqueezeDecoderBasicBlock(nn.Module):
-    def __init__(self, in_channels, mid_channels, out_channels, t_conv_kernel_size):
-        super(_UNetSqueezeDecoderBasicBlock, self).__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(in_channels, mid_channels, 3, 1, 1),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(mid_channels, mid_channels, t_conv_kernel_size, 2),
-            nn.Conv2d(mid_channels, out_channels, 3, 1, 1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-        )
-
-    def forward(self, x):
-        return self.block(x)
-
-
-class UNetSqueeze(models.SqueezeNet):
-    def __init__(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            super(UNetSqueeze, self).__init__()
-            # self.load_state_dict(torch.load(os.path.expanduser('~/.torch/models/squeezenet1_0-a815701f.pth')))
-
-        del self.classifier
-
-        self.decoder = nn.ModuleList([
-            nn.ConvTranspose2d(512, 256, 3, 2),
-            _UNetSqueezeDecoderBasicBlock(512, 256, 128, 2),
-            _UNetSqueezeDecoderBasicBlock(256, 128, 64, 3),
-            _UNetSqueezeDecoderBasicBlock(160, 80, 40, 8),
-            nn.Conv2d(40, 4, 3, 1, 1)
-        ])
-
-    def forward(self, x):
-        activations = []
-        for layer in self.features:
-            x = layer(x)
-            activations.append(x)
-
-        x = self.decoder[0](x)
-        x = self.decoder[1](torch.cat((x, activations[7]), dim=1))
-        x = self.decoder[2](torch.cat((x, activations[4]), dim=1))
-        x = self.decoder[3](torch.cat((x, activations[1]), dim=1))
-        x = self.decoder[4](x)
-
-        return x
-
-    def __repr__(self):
-        return 'UNetSqueeze'
+__all__ = ['UNetVgg', 'UNetVggVar', 'SegNetVgg']
 
 
 def _make_vgg_encoder_layers(version, batch_norm=True, return_indices=False):
@@ -141,6 +87,50 @@ class UNetVgg(nn.Module):
         return 'UNetVgg'
 
 
+class UNetVggVar(nn.Module):
+    def __init__(self):
+        super(UNetVggVar, self).__init__()
+
+        # Construct and load vgg11_bn encoder
+        self.features = nn.Sequential(*_make_vgg_encoder_layers('vgg11'))
+
+        # Construct decoder
+        self.decoder = nn.ModuleList([
+            _UNetVggDecoderBasicBlock(512, 1024, 512),
+            _UNetVggDecoderBasicBlock(512, 512, 512),
+            _UNetVggDecoderBasicBlock(512, 512, 256),
+            _UNetVggDecoderBasicBlock(256, 256, 128),
+            _UNetVggDecoderBasicBlock(128, 128, 64),
+            nn.Sequential(
+                nn.Conv2d(64, 64, 3, 1, 1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 64, 3, 1, 1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 4, 3, 1, 1)
+            )
+        ])
+
+    def forward(self, x):
+        features = []
+        for layer in self.features:
+            x = layer(x)
+            features.append(x)
+
+        x = self.decoder[0](x)
+        x = self.decoder[1](x + features[27])
+        x = self.decoder[2](x + features[20])
+        x = self.decoder[3](x + features[13])
+        x = self.decoder[4](x + features[6])
+        x = self.decoder[5](x + features[2])
+
+        return x
+
+    def __repr__(self):
+        return 'UNetVggVar'
+
+
 class _SegNetDecoderBasicBlock(nn.Module):
     def __init__(self, conv_num, in_channels, out_channels, last_block=False):
         super(_SegNetDecoderBasicBlock, self).__init__()
@@ -162,9 +152,9 @@ class _SegNetDecoderBasicBlock(nn.Module):
         return self.convs(x)
 
 
-class SegNetVgg16(nn.Module):
+class SegNetVgg(nn.Module):
     def __init__(self):
-        super(SegNetVgg16, self).__init__()
+        super(SegNetVgg, self).__init__()
         # Both self.features and self.decoder are of type nn.ModuleList
         self.features = nn.ModuleList(_make_vgg_encoder_layers('vgg16', return_indices=True))
         self.decoder = nn.ModuleList([

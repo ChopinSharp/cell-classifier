@@ -2,15 +2,18 @@ import cv2
 import torch
 from torchvision import datasets, transforms
 import os
-from utils import opencv_transforms
 from visdom import Visdom
 import numpy as np
 
-__all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'using_device', 'VisdomBoard', 'expand_subdir']
+__all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'using_device', 'using_port', 'VisdomBoard',
+           'expand_subdir']
 
 
 # Device to use in training
 using_device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
+
+# Port on which Visdom run
+using_port = 2337
 
 
 def opencv_loader(path):
