@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
+from torchvision import models
 
 
-__all__ = ['UNetVgg', 'UNetVggVar', 'SegNetVgg']
+__all__ = ['UNetVgg', 'UNetVggVar', 'SegNetVgg', 'LinkNetRes', 'LinkNetSqueeze']
 
 
 def _make_vgg_encoder_layers(version, batch_norm=True, return_indices=False):
@@ -84,10 +85,14 @@ class UNetVgg(nn.Module):
         return x
 
     def __repr__(self):
-        return 'UNetVgg'
+        return self.__class__.__name__
 
 
 class UNetVggVar(nn.Module):
+    """
+    Almost the same as UNetVgg, but use addition instead of concatenation when joining main branch with skip branch.
+    """
+
     def __init__(self):
         super(UNetVggVar, self).__init__()
 
@@ -128,7 +133,7 @@ class UNetVggVar(nn.Module):
         return x
 
     def __repr__(self):
-        return 'UNetVggVar'
+        return self.__class__.__name__
 
 
 class _SegNetDecoderBasicBlock(nn.Module):
@@ -181,5 +186,143 @@ class SegNetVgg(nn.Module):
         return x
 
     def __repr__(self):
-        return 'SegNetVgg16'
+        return self.__class__.__name__
+
+
+class LinkNetDecoderBlock1(nn.Module):
+    def __init__(self, m, n, k=2):
+        assert m % 4 == 0, 'm={} is not a multiple of 4'.format(m)
+        super(LinkNetDecoderBlock1, self).__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(m, m // 4, 1, 1),
+            nn.BatchNorm2d(m // 4),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(m // 4, m // 4, k, 2),
+            nn.Conv2d(m // 4, n, 1, 1),
+            nn.BatchNorm2d(n),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
+class LinkNetDecoderBlock2(nn.Module):
+    def __init__(self, m, n):
+        super(LinkNetDecoderBlock2, self).__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(m, m, 3, 1, 1),
+            nn.BatchNorm2d(m),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(m, n, 2, 2)
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+
+class LinkNetRes(nn.Module):
+    """
+    Use ResNet18 as encoder, use LinkNet decoder.
+    """
+    def __init__(self):
+        super(LinkNetRes, self).__init__()
+        self.features = models.resnet18()
+        del self.features.avgpool
+        del self.features.fc
+
+        self.decoder = nn.ModuleList([
+            LinkNetDecoderBlock1(512, 256),
+            LinkNetDecoderBlock1(256, 128),
+            LinkNetDecoderBlock1(128, 64),
+            LinkNetDecoderBlock2(64, 64),
+            LinkNetDecoderBlock2(64, 4),
+            # nn.Sequential(
+            #     nn.Conv2d(32, 32, 3, 1, 1),
+            #     nn.BatchNorm2d(32),
+            #     nn.ReLU(inplace=True),
+            #     nn.Conv2d(32, 32, 3, 1, 1)
+            # )
+        ])
+
+    def forward(self, x):
+        # Encoding
+        skips = []
+        x = self.features.conv1(x)
+        x = self.features.bn1(x)
+        x = self.features.relu(x)
+        skips.append(x)
+        x = self.features.maxpool(x)
+        x = self.features.layer1(x)
+        skips.append(x)
+        x = self.features.layer2(x)
+        skips.append(x)
+        x = self.features.layer3(x)
+        skips.append(x)
+        x = self.features.layer4(x)
+
+        # Decoding
+        x = self.decoder[0](x)
+        for i in range(1, 5):
+            x = self.decoder[i](x + skips.pop())
+        # x = self.decoder[5](x)
+
+        return x
+
+    def __repr__(self):
+        return self.__class__.__name__
+
+
+class LinkNetSqueeze(nn.Module):
+    def __init__(self):
+        super(LinkNetSqueeze, self).__init__()
+        self.features = models.squeezenet1_0().features
+        self.decoder = nn.ModuleList([
+            LinkNetDecoderBlock1(512, 512, k=3),
+            LinkNetDecoderBlock1(512, 256),
+            LinkNetDecoderBlock1(256, 96, k=3),
+            LinkNetDecoderBlock2(96, 48),
+            nn.Sequential(
+                nn.Conv2d(48, 48, 3, 1, 1),
+                nn.BatchNorm2d(48),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(48, 4, 3, 1, 1)
+            )
+        ])
+
+    def forward(self, x):
+        input_size = x.size()
+
+        # Encode
+        activations = []
+        for layer in self.features:
+            x = layer(x)
+            activations.append(x)
+        skips = [activations[1], activations[5], activations[10]]
+
+        # Decode
+        x = self.decoder[0](x)
+        for i in range(1, 4):
+            x = self.decoder[i](x + self._interpolate(skips.pop(), x.size()[2:]))
+        x = self.decoder[4](x)
+
+        return self._interpolate(x, input_size[2:])
+
+    @staticmethod
+    def _interpolate(x, size):
+        return nn.functional.interpolate(x, size, mode='bilinear', align_corners=True)
+
+    def __repr__(self):
+        return self.__class__.__name__
+
+
+def test():
+    model = LinkNetSqueeze()
+    x = torch.zeros(2, 3, 1024, 1024)
+    y = model(x)
+    print(y.size())
+
+
+if __name__ == '__main__':
+    test()
 

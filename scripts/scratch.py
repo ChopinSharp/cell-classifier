@@ -51,8 +51,16 @@ def inspect_resnet():
     print('after layer4', x.size())
 
 
+def inspect_features(features):
+    x = torch.zeros(1, 3, 224, 224)
+    for idx, layer in enumerate(features):
+        x = layer(x)
+        print(idx, x.size())
+
+
 if __name__ == '__main__':
-    inspect_resnet()
+    model = models.squeezenet1_0()
+    inspect_features(model.features)
 
 
 

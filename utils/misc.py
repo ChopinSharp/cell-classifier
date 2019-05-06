@@ -6,7 +6,7 @@ from visdom import Visdom
 import numpy as np
 
 __all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'using_device', 'using_port', 'VisdomBoard',
-           'expand_subdir']
+           'expand_subdir', 'format_html_result']
 
 
 # Device to use in training
@@ -138,3 +138,29 @@ class VisdomBoard:
             name='Phase 2',
             update='append'
         )
+
+
+def format_html_result(title, t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg):
+    return """<p>Test Result of {0}</p>
+<table border="1" cellspacing="0" style="border-collapse:collapse">
+<tr>
+    <th>Background</th>
+    <td>{1:.4f}</th>
+</tr>
+<tr>
+    <th>WT</th>
+    <td>{2:.4f}</th>
+</tr>
+<tr>
+    <th>Fragmented</th>
+    <td>{3:.4f}</th>
+</tr>
+<tr>
+    <th>Hyperfused</th>
+    <td>{4:.4f}</th>
+</tr>
+<tr>
+    <th>Mean</th>
+    <td>{5:.4f}</th>
+</tr>
+</table>""".format(title, t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg)

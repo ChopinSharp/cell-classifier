@@ -14,6 +14,7 @@ from visdom import Visdom
 
 
 model_urls = {
+    'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
     'squeezenet1_0': 'https://download.pytorch.org/models/squeezenet1_0-a815701f.pth',
     'vgg11_bn': 'https://download.pytorch.org/models/vgg11_bn-6002323d.pth',
     'vgg16_bn': 'https://download.pytorch.org/models/vgg16_bn-6c64b313.pth'
@@ -28,6 +29,14 @@ def load_pretrained_weights(model):
         pretrained_model = model_zoo.load_url(model_urls['vgg11_bn'])
     elif isinstance(model, SegNetVgg):
         pretrained_model = model_zoo.load_url(model_urls['vgg16_bn'])
+    elif isinstance(model, LinkNetRes):
+        pretrained_model = model_zoo.load_url(model_urls['resnet18'])
+        pretrained_model.pop('fc.weight')
+        pretrained_model.pop('fc.bias')
+        model.features.load_state_dict(pretrained_model)
+        return
+    elif isinstance(model, LinkNetSqueeze):
+        pretrained_model = model_zoo.load_url(model_urls['squeezenet1_0'])
 
     model.features.load_state_dict({
         k[len('features.'):]: v for k, v in pretrained_model.items() if k.split('.')[0] == 'features'
@@ -52,10 +61,16 @@ def set_parameter_requires_grad(model, phase):
             param.requires_grad = (phase == 'Phase 2')  # and int(name.split('.')[0]) >= 8) # 15
     elif isinstance(model, UNetVgg):
         for name, param in model.features.named_parameters():
-            param.requires_grad = (phase == 'Phase 2')# and int(name.split('.')[0]) >= 8) # 15
+            param.requires_grad = (phase == 'Phase 2')  # and int(name.split('.')[0]) >= 8) # 15
     elif isinstance(model, SegNetVgg):
         for name, param in model.features.named_parameters():
-            param.requires_grad = (phase == 'Phase 2')# and int(name.split('.')[0]) >= 14) # 24
+            param.requires_grad = (phase == 'Phase 2')  # and int(name.split('.')[0]) >= 14) # 24
+    elif isinstance(model, LinkNetRes):
+        for name, param in model.features.named_parameters():
+            param.requires_grad = (phase == 'Phase 2')
+    elif isinstance(model, LinkNetSqueeze):
+        for name, param in model.features.named_parameters():
+            param.requires_grad = (phase == 'Phase 2')
     else:
         raise Exception('Model type is not supported.')
 
@@ -277,7 +292,7 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
                     print('+ %s Loss: %.4f IoU: %.4f' % (inner_phase, epoch_loss, epoch_iou))
 
                 # Deep copy the best model so far
-                if inner_phase == 'val' and epoch_iou > best_model_info['val_iou']:
+                if inner_phase == 'val' and epoch_iou >= best_model_info['val_iou']:
                     best_model_info['val_iou'] = epoch_iou
                     best_model_info['model_dict'] = copy.deepcopy(model.state_dict())
                     best_model_info['epoch'] = epoch + 1
@@ -294,9 +309,10 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
                     else:
                         viz_board.update_phase_2(epoch_idx, epoch_iou, epoch_loss)
                     epoch_idx += 1
+        # Load best model weights in this phase
+        model.load_state_dict(best_model_info['model_dict'])
 
-    # Load best model weights
-    model.load_state_dict(best_model_info['model_dict'])
+    # Log
     print('\n* Best val IoU: %(val_iou)f at [%(outer_phase)s] epoch %(epoch)d\n' % best_model_info)
 
     return val_iou_history, loss_history
@@ -359,11 +375,10 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
     print('* Found best model at lr=%(lr)g, wd=%(wd)g, val_iou=%(val_iou)g\n' % best_model_info)
 
     # Test model
-    t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg = test_model(model, dataloaders['test'])
-    test_result = 'Test results:\n  iou_0: %f\n  iou_1: %f\n  iou_2: %f\n  iou_3: %f\n  iou_avg: %f' % \
-                  (t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg)
+    test_iou = test_model(model, dataloaders['test'])
+    test_result = 'Test results:\n  iou_0: %f\n  iou_1: %f\n  iou_2: %f\n  iou_3: %f\n  iou_avg: %f' % test_iou
     print(test_result)
-    Visdom(port=using_port).text(test_result, win='[{}] Test Result'.format(best_model_info['timestamp']))
+    Visdom(port=using_port).text(format_html_result(best_model_info['timestamp'], *test_iou))
 
     # Reload best model
     model.load_state_dict(best_model_info['model_dict'])
@@ -371,16 +386,16 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
 
 
 def main():
-    model = UNetVggVar()
+    model = LinkNetSqueeze()
     timestamp = validate_model(
         model,
         '../datasets/data0229_seg_enhanced',
         # np.linspace(5e-6, 1e-4, 6),
         # np.linspace(1e-6, 1e-3, 6),
-        [4e-5],
+        [4e-5],  # 4e-5
         [2e-5],
         {'Phase 1': 100, 'Phase 2': 150},
-        phase_2_lr_ratio=1 / 8,
+        phase_2_lr_ratio=1 / 8,  # 1/8
         batch_size=16
     )
     torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))
