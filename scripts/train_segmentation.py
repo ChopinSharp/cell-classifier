@@ -386,7 +386,7 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
 
 
 def main():
-    model = LinkNetSqueeze()
+    model = UNetVggVar()
     timestamp = validate_model(
         model,
         '../datasets/data0229_seg_enhanced',
@@ -398,7 +398,12 @@ def main():
         phase_2_lr_ratio=1 / 8,  # 1/8
         batch_size=16
     )
-    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))
+    model.to('cpu')
+    if isinstance(model, torch.jit.ScriptModule):
+        model.save(os.path.abspath('../results/saved_scripts/%s %s.pt' % (repr(model), timestamp)))
+    else:
+        torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))
+
     print('\ndone')
 
 

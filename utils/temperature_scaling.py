@@ -1,7 +1,7 @@
 import torch
 from torch import nn, optim
 from torch.nn import functional as F
-from utils import using_device
+from utils.misc import using_device
 
 
 def compute_temperature(model, val_loader=None, verbose=False):

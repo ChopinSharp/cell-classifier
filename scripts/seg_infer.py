@@ -64,11 +64,12 @@ def montage(images):
     return np.concatenate(rows, axis=0)
 
 
-def infer(model, folder_url):
+def infer(model, model2, folder_url):
     files = os.listdir(folder_url)
     total = len(files)
     # fig = plt.figure(figsize=[10, 5 * total])
     model.eval()
+    model2.eval()
     images = []
     for idx, name in enumerate(files):
         image_url = os.path.join(folder_url, name)
@@ -76,12 +77,17 @@ def infer(model, folder_url):
         ori_image = (image / 256).astype(np.uint8)
         image_enhanced = adjust_contrast(image, 0.35)  # merge_tif(image_url)
         float_image = image_enhanced.astype(np.float32) / 256
+        cv2.resize(float_image, (), interpolation=self.interpolation)
         float_image = pad_channels(float_image)
         inputs = torch.from_numpy(float_image.transpose((2, 0, 1)))
         mean = inputs.mean()
         std = inputs.std()
         print('mean:', mean.item(), 'std:', std.item())
         inputs = inputs.sub(mean).div(std).unsqueeze(0).float()
+
+        o1 = model(inputs)
+        o2 = model2(inputs)
+        print('distance {0:.8f}'.format(torch.pow(o1 - o2, 2).sum().item()))
 
         preds = model(inputs).argmax(dim=1)
         palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
@@ -132,14 +138,16 @@ def visualize_model(model, loader):
 
 
 def main():
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--model', type=str, required=True, help='path to model')
-    parser.add_argument('--input', type=str, required=True, help='input directory')
-    args = parser.parse_args()
-    model = UNetVgg()
-    model.load_state_dict(torch.load(os.path.join('../results/saved_models', args.model)))
-    infer(model, args.input)
+    # import argparse
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument('--model', type=str, required=True, help='path to model')
+    # parser.add_argument('--input', type=str, required=True, help='input directory')
+    # args = parser.parse_args()
+    model2 = UNetVggVar()
+    model2.load_state_dict(torch.load(os.path.join('../results/saved_models', 'UNetVggVarCPU.pt')))
+    model = torch.jit.load('../results/saved_scripts/UNetVggVar.pt')
+
+    infer(model, model2, '../datasets/demo')
 
 
 if __name__ == '__main__':
