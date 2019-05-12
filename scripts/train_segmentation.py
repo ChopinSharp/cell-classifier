@@ -127,13 +127,14 @@ def get_scaled_size(size):
     return size[0] // 32 * 32, size[1] // 32 * 32
 
 
-def create_dataloaders(base_dir, batch_size, img_size=(400, 600)):
+def create_dataloaders(base_dir, batch_size, img_size=(400, 600), _batch_size=4, verbose=True):
     """Create datasets and dataloaders.
 
     Args:
         base_dir: Top directory of dataset.
-        batch_size: Batch size.
+        batch_size: Batch size for training.
         img_size: Original image size.
+        _batch_size: Batch size for validation and testing.
 
     Returns:
         dataloaders: A dictionary that holds dataloaders for training, validating and testing.
@@ -143,7 +144,8 @@ def create_dataloaders(base_dir, batch_size, img_size=(400, 600)):
     """
 
     scaled_size = get_scaled_size(img_size)
-    print('* val and test images are scaled to', scaled_size)
+    if verbose:
+        print('* val and test images are scaled to', scaled_size)
 
     # Get dataset mean and std
     dataset_mean, dataset_std = estimate_dataset_mean_and_std([os.path.join(base_dir, 'data')])
@@ -183,7 +185,7 @@ def create_dataloaders(base_dir, batch_size, img_size=(400, 600)):
     }
 
     # Create training and validation dataloaders
-    batch_sizes = {'train': batch_size, 'val': 4, 'test': 4}
+    batch_sizes = {'train': batch_size, 'val': _batch_size, 'test': _batch_size}
     dataloaders = {
         x: torch.utils.data.DataLoader(image_datasets[x], batch_size=batch_sizes[x], shuffle=True, num_workers=1)
         for x in ['train', 'val', 'test']

@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torchvision import models
+from scripts.train_segmentation import create_dataloaders
 
 
 data_dir = '../datasets/data0229_svm/WT'
@@ -59,19 +60,8 @@ def inspect_features(features):
 
 
 if __name__ == '__main__':
-    from main.cell_segmentation import UNetVggVar
-    model = UNetVggVar()
-    model.load_state_dict(torch.load('../results/saved_models/UNetVggVarCPU.pt'))
-    inputs = torch.randn(1, 3, 224, 224)
-    model_script = torch.jit.trace(model, inputs)
-    print('model traced')
-    o1 = model(inputs)
-    o2 = model_script(inputs)
-    print('distance {0:.8f}'.format(torch.pow(o1 - o2, 2).sum().item()))
-    model_script.save('../results/saved_scripts/UNetVggVar.pt')
-    m = torch.jit.load('../results/saved_scripts/UNetVggVar.pt')
-    o3 = m(inputs)
-    print('distance {0:.8f}'.format(torch.pow(o1 - o3, 2).sum().item()))
+    pass
+
 
 
 
