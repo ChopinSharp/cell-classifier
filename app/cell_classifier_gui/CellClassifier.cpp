@@ -33,7 +33,7 @@ CellClassifier::CellClassifier(string model_url, bool verbose)
 		exit(2);
 	}
 
-	/* some crappy logic to get the params cause C++ don't have a f**king split */
+	/* Some crappy logic to get the params cause C++ don't have a f**king split */
 	string temp_str;
 	auto pos_1 = model_url.find('%');
 	auto pos_2 = model_url.find('%', pos_1 + 1);

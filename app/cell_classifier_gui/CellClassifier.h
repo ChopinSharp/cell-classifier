@@ -4,6 +4,8 @@
 #include <torch/script.h>
 #include <torch/torch.h>
 #include <opencv2/opencv.hpp>
+#include <QMetaType>
+
 
 using std::shared_ptr;
 using std::pair;
@@ -23,7 +25,9 @@ struct Roi
 class CellClassifier
 {
 public:
+	CellClassifier() {}
 	CellClassifier(string model_url, bool verbose=false);
+	CellClassifier(const CellClassifier &other) : module(other.module), mean(other.mean), std(other.std), temperature(other.temperature) {}
 	shared_ptr<Pred> predict_single(string image_url, const Roi &roi=Roi(), bool verbose=false);
 	shared_ptr<vector<NamedPred>> predict_batch(string folder_url);
 	void run_shell();
@@ -40,3 +44,4 @@ private:
 public:
 	static const string class_names[3];
 };
+Q_DECLARE_METATYPE(CellClassifier)

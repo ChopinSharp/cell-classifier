@@ -7,6 +7,8 @@
 #include <filesystem>
 #include <memory>
 #include <fstream>
+#include <QMetaType>
+
 
 namespace fs = std::filesystem;
 
@@ -39,17 +41,17 @@ QChart *create_bar_chart(double fg_conf, double hf_conf, double wt_conf)
 	chart->legend()->hide();
 	//chart->setFont(QFont("Microsoft YaHei UI", 12));
 	chart->setTitleFont(QFont("Microsoft YaHei UI", 14, QFont::Bold));
-
 	return chart;
 }
 
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow),
-	classifier(R"(models\squeezenet%Sun Mar 31 17#59#37 2019%0.677%0.12210%0.14149.pt)")
+	classifier(R"(models\classification\squeezenet%Sun Mar 31 17#59#37 2019%0.677%0.12210%0.14149.pt)")
 {
     ui->setupUi(this);
 
+	/* Setup graphics view and chart view */
     this->scene = new QGraphicsScene(this);
     this->img = scene->addPixmap(QPixmap());
 	this->chart = new QChart();
@@ -58,21 +60,40 @@ MainWindow::MainWindow(QWidget *parent) :
     ui->graphicsView->setAlignment(Qt::AlignLeft | Qt::AlignTop);
     ui->graphicsView->setBackgroundRole(QPalette::Midlight);
 	ui->chartView->setRenderHint(QPainter::Antialiasing);
+	
+	/* Set window title */
 	setWindowTitle("Cell Classifier GUI");
 
+	/* Setup progress bar */
 	progress_bar = new QProgressBar();
 	progress_bar->setFixedWidth(120);
 	progress_bar->hide();
+
+	/* Setup status bar */
 	ui->statusBar->addPermanentWidget(progress_bar);
 	ui->statusBar->showMessage(QString("Ready."));
 
+	/* Setup thread for batch inference */
+	batch_predictor.moveToThread(&batch_thread);
+	batch_thread.start();
+
+	/* Connect signals and slots */
+	qRegisterMetaType<CellClassifier>("CellClassifier");
 	connect(this, &MainWindow::prediction_changed, this, &MainWindow::label_on_prediction_changed);
 	connect(this, &MainWindow::prediction_changed, this, &MainWindow::chart_on_prediction_changed);
+	connect(&batch_predictor, &BatchPredictor::update_progress_bar, this, &MainWindow::when_update_progress_bar);
+	connect(&batch_predictor, &BatchPredictor::update_status_bar, this, &MainWindow::when_update_status_bar);
+	connect(&batch_predictor, &BatchPredictor::result_ready, this, &MainWindow::when_result_ready);
+	connect(this, &MainWindow::save_result_to_file, &batch_predictor, &BatchPredictor::when_save_result_to_file);
+	connect(this, &MainWindow::start_batch_prediction, &batch_predictor, &BatchPredictor::when_start_batch_predicton);
+
 }
 
 MainWindow::~MainWindow()
 {
     delete ui;
+	batch_thread.quit();
+	batch_thread.wait();
 }
 
 void MainWindow::on_actionOpenImage_triggered()
@@ -123,6 +144,23 @@ void MainWindow::on_actionOpenImage_triggered()
 void MainWindow::on_actionOpenFolder_triggered()
 {
 	predict_batch();
+}
+
+void MainWindow::on_radioButtonOri_clicked()
+{
+	qDebug() << "show original";
+
+}
+
+void MainWindow::on_radioButtonEnh_clicked()
+{
+	qDebug() << "show enhanced";
+
+}
+
+void MainWindow::on_radioButtonSeg_clicked()
+{
+	qDebug() << "show segmentation";
 }
 
 void MainWindow::on_graphicsView_rubberBandChanged(const QRect &viewportRect, const QPointF &fromScenePoint, const QPointF &toScenePoint)
@@ -218,8 +256,31 @@ void MainWindow::chart_on_prediction_changed(int pred, double fg_conf, double hf
 	this->chart = ui->chartView->chart();
 }
 
+void MainWindow::when_update_progress_bar(int progress)
+{
+	qDebug() << "in MainWindow::on_update_progress_bar";
+	progress_bar->setValue(progress);
+}
+
+void MainWindow::when_update_status_bar(QString info)
+{
+	qDebug() << "in MainWindow::on_update_status_bar";
+	ui->statusBar->showMessage(info);
+}
+
+void MainWindow::when_result_ready()
+{
+	qDebug() << "in MainWindow::on_result_ready";
+	QString file_name = QFileDialog::getSaveFileName(this, tr("Save to"), "", tr("CSV File (*.csv)"));
+	qDebug() << file_name;
+	emit save_result_to_file(file_name);
+	progress_bar->hide();
+
+}
+
 void MainWindow::predict_batch()
 {
+	qDebug() << "in predict_batch";
 	QString dir = QFileDialog::getExistingDirectory(this, tr("Open Directory"));
 	if (dir.isNull())
 	{
@@ -229,7 +290,23 @@ void MainWindow::predict_batch()
 	qDebug() << "folder selected: " << dir;
 	string folder_url = dir.toStdString();
 
-	auto results = std::make_shared<std::vector<NamedPred>>();
+	int total = 0;
+	for (auto& p : fs::recursive_directory_iterator(folder_url)) total++;
+
+	/* Prepare progress bar */
+	progress_bar->setMaximum(total);
+	progress_bar->setMinimum(0);
+	progress_bar->setValue(0);
+	progress_bar->show(); 
+
+	emit start_batch_prediction(this->classifier, QString::fromStdString(folder_url));
+}
+
+void BatchPredictor::when_start_batch_predicton(CellClassifier classifier, QString q_folder_url)
+{
+	string folder_url = q_folder_url.toStdString();
+	qDebug() << "in BatchPredictor::on_start_batch_predicton";
+	this->results = std::make_shared<std::vector<NamedPred>>();
 
 	/* Get base directory length, for URL formatting */
 	auto base_length = folder_url.length();
@@ -238,20 +315,11 @@ void MainWindow::predict_batch()
 		base_length += 1;
 	}
 
-	int total = 0;
-	for (auto& p : fs::recursive_directory_iterator(folder_url)) total++;
-
-	/* Prepare progress bar */
-	int progress = 1;
-	progress_bar->setMaximum(total);
-	progress_bar->setMinimum(0);
-	progress_bar->setValue(0);
-	progress_bar->show();
-
 	/* Iterate and Infer */
+	int progress = 1;
 	for (auto& p : fs::recursive_directory_iterator(folder_url))
 	{
-		
+
 		if (fs::is_directory(p.path()))
 		{
 			// skip directory entry
@@ -259,16 +327,15 @@ void MainWindow::predict_batch()
 		else if (fs::is_regular_file(p.path()))
 		{
 			auto relative_url = p.path().string().substr(base_length);
-			ui->statusBar->showMessage(
-				QString::fromStdString("Running batch inference - processing \"" + relative_url + "\"")
-			);
-			auto pred = this->classifier.predict_single(p.path().string(), Roi(), false);
+			emit update_status_bar(QString::fromStdString("Running batch inference - processing \"" + relative_url + "\""));
+
+			auto pred = classifier.predict_single(p.path().string(), Roi(), false);
 			if (pred != nullptr)
 			{
 				NamedPred result;
 				result.first = relative_url;
 				result.second = pred;
-				results->push_back(result);
+				this->results->push_back(result);
 			}
 			else
 			{
@@ -279,22 +346,18 @@ void MainWindow::predict_batch()
 		{
 			// unlikely to reach, no action taken ...
 		}
-		progress_bar->setValue(++progress);
+		emit update_progress_bar(++progress);
 	}
-	ui->statusBar->showMessage(QString("Batch inference complete."));
-
-	/* Save results */
-	QString file_name = QFileDialog::getSaveFileName(this, tr("Save to"), "", tr("CSV File (*.csv)"));
-	qDebug() << file_name;
-	save_batch_result_to_csv(results, file_name);
-	progress_bar->hide();
+	emit update_status_bar(QString("Batch inference complete."));
+	emit result_ready();
 }
 
-void MainWindow::save_batch_result_to_csv(shared_ptr<vector<NamedPred>> results, QString q_file_name)
+void BatchPredictor::when_save_result_to_file(QString q_file_name)
 {
+	qDebug() << "in BatchPredictor::on_save_result_to_file";
 	if (q_file_name.isNull())
 	{
-		ui->statusBar->showMessage(QString("Results unsaved, canceled by user."));
+		emit update_status_bar(QString("Results unsaved, canceled by user."));
 		return;
 	}
 	string file_name = q_file_name.toStdString();
@@ -318,10 +381,11 @@ void MainWindow::save_batch_result_to_csv(shared_ptr<vector<NamedPred>> results,
 	fout << "\"[ CONCLUSION ] " << total << " images in total";
 	for (int i = 0; i < 3; i++)
 	{
-		fout << ", " << count[i] << " " << CellClassifier::class_names[i] 
-			 << " (" << 100 * count[i] / total << "%)";
+		fout << ", " << count[i] << " " << CellClassifier::class_names[i]
+			<< " (" << 100 * count[i] / total << "%)";
 	}
 	fout << ".\"\n";
 	fout.close();
-	ui->statusBar->showMessage(QString::fromStdString("Results saved to \"" + file_name + "\""));
+	emit update_status_bar(QString::fromStdString("Results saved to \"" + file_name + "\""));
 }
+

@@ -6,19 +6,19 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>1424</width>
+    <width>1324</width>
     <height>670</height>
    </rect>
   </property>
   <property name="minimumSize">
    <size>
-    <width>1400</width>
+    <width>1300</width>
     <height>670</height>
    </size>
   </property>
   <property name="maximumSize">
    <size>
-    <width>1424</width>
+    <width>1324</width>
     <height>670</height>
    </size>
   </property>
@@ -31,40 +31,86 @@
      <widget class="QGroupBox" name="groupBox">
       <property name="minimumSize">
        <size>
-        <width>900</width>
+        <width>800</width>
         <height>600</height>
        </size>
       </property>
       <property name="maximumSize">
        <size>
-        <width>900</width>
+        <width>800</width>
         <height>600</height>
        </size>
       </property>
       <property name="title">
        <string>Image</string>
       </property>
-      <layout class="QGridLayout" name="gridLayout">
-       <item row="0" column="0">
-        <widget class="QGraphicsView" name="graphicsView">
-         <property name="minimumSize">
-          <size>
-           <width>600</width>
-           <height>400</height>
-          </size>
-         </property>
-         <property name="maximumSize">
-          <size>
-           <width>1200</width>
-           <height>800</height>
-          </size>
-         </property>
-         <property name="cursor" stdset="0">
-          <cursorShape>CrossCursor</cursorShape>
-         </property>
-        </widget>
-       </item>
-      </layout>
+      <widget class="QGraphicsView" name="graphicsView">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>44</y>
+         <width>781</width>
+         <height>541</height>
+        </rect>
+       </property>
+       <property name="minimumSize">
+        <size>
+         <width>600</width>
+         <height>400</height>
+        </size>
+       </property>
+       <property name="maximumSize">
+        <size>
+         <width>1200</width>
+         <height>800</height>
+        </size>
+       </property>
+       <property name="cursor" stdset="0">
+        <cursorShape>CrossCursor</cursorShape>
+       </property>
+      </widget>
+      <widget class="QRadioButton" name="radioButtonOri">
+       <property name="geometry">
+        <rect>
+         <x>10</x>
+         <y>20</y>
+         <width>89</width>
+         <height>16</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Original</string>
+       </property>
+       <property name="checked">
+        <bool>true</bool>
+       </property>
+      </widget>
+      <widget class="QRadioButton" name="radioButtonSeg">
+       <property name="geometry">
+        <rect>
+         <x>250</x>
+         <y>20</y>
+         <width>111</width>
+         <height>16</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Segmentation</string>
+       </property>
+      </widget>
+      <widget class="QRadioButton" name="radioButtonEnh">
+       <property name="geometry">
+        <rect>
+         <x>130</x>
+         <y>20</y>
+         <width>89</width>
+         <height>16</height>
+        </rect>
+       </property>
+       <property name="text">
+        <string>Enhanced</string>
+       </property>
+      </widget>
      </widget>
     </item>
     <item>
@@ -94,7 +140,7 @@
        </font>
       </property>
       <property name="title">
-       <string>Result</string>
+       <string>Classificaton Result</string>
       </property>
       <layout class="QVBoxLayout" name="verticalLayout">
        <item>
@@ -273,7 +319,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>1424</width>
+     <width>1324</width>
      <height>23</height>
     </rect>
    </property>
@@ -302,6 +348,44 @@
   <action name="actionOpenFolder">
    <property name="text">
     <string>Open Folder</string>
+   </property>
+  </action>
+  <action name="actionInput_Image">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Input Image</string>
+   </property>
+  </action>
+  <action name="actionSegmentation">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Segmentation</string>
+   </property>
+  </action>
+  <action name="actionInput_Image_2">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="checked">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Input Image</string>
+   </property>
+  </action>
+  <action name="actionSegmentation_2">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Segmentation</string>
    </property>
   </action>
  </widget>
