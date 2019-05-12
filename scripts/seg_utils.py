@@ -116,8 +116,6 @@ def visualize_model(model, data_dir, save_path='visualization.jpg'):
 
 def test_tracing(model, script, data_dir=None, loader=None, save_path='test_tracing.jpg'):
     assert data_dir is not None or loader is not None, 'either data_dir or loader should not be None'
-    model.eval()
-    script.eval()
     palette = np.array([[0, 0, 0], [255, 0, 0], [0, 255, 0], [0, 0, 255]])
     if loader is None:
         loaders, *_ = create_dataloaders(data_dir, 1, _batch_size=1, verbose=False)
@@ -140,20 +138,18 @@ def test_tracing(model, script, data_dir=None, loader=None, save_path='test_trac
 def convert_to_torch_script():
     model = UNetVggVar()
     model.load_state_dict(torch.load('../results/saved_models/UNetVggVarCPU.pt'))
-    model.eval()  # Remember to put model in eval mode before tracing
+    model.eval()  # NOTE: ALWAYS remember to put model in EVAL mode before tracing !!!
     inputs = torch.randn(1, 3, 224, 224)
     loaders, *_ = create_dataloaders('../datasets/data0229_seg_enhanced', 1, _batch_size=1, verbose=False)
-    # val_iterator = iter(loaders['val'])
-    # num_examples = 1
-    example_inputs = []
-    # for i in range(num_examples):
-    #     x, y = next(val_iterator)
-    #     example_inputs.append(x)
-    for x, y in loaders['test']:
-        example_inputs.append(x)
+    # Use val dataset to test tracing
+    check_inputs = []
+    for x, y in loaders['val']:
+        check_inputs.append(x)
     print('Tracing model ...')
-    script = torch.jit.trace(model, inputs)  # , check_inputs=example_inputs)
-    test_tracing(model, script, loader=loaders['test'])
+    script = torch.jit.trace(model, inputs, check_inputs=check_inputs)
+    script_url = '../results/saved_scripts/UNetVggVar0512.pt'
+    torch.jit.save(script, script_url)
+    test_tracing(model, torch.jit.load(script_url), loader=loaders['test'])
 
 
 def main():
