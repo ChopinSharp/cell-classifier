@@ -1,15 +1,14 @@
 ﻿#include "CellClassifier.h"
+#include "utils.h"
 #include <iostream>
 #include <cstdlib>
 #include <iomanip>
 #include <sstream>
-#include <fstream>
 #include <filesystem>
 
 using namespace std;
 using namespace cv;
 namespace fs = std::filesystem;
-
 
 const int input_size = 224;
 const unsigned long err_gap = 800;
@@ -54,63 +53,19 @@ CellClassifier::CellClassifier(string model_url, bool verbose)
 	}
 }
 
-shared_ptr<Pred> CellClassifier::predict_single(string image_url, const Roi &roi, bool verbose)
+shared_ptr<Pred> CellClassifier::predict_single(const Mat &image, const Roi &roi)
 {
-	/* Read in image */
-	Mat ori_image = imread(image_url, IMREAD_COLOR | IMREAD_ANYDEPTH);
-	if (ori_image.data == nullptr) 
-	{
-		cerr << "ERROR: Fail to open image: " << image_url << endl;
-		return nullptr;
-	}
-
-	/* Print out image info if verbose is on */
-	if (verbose) 
-	{
-		const string depth_str[] = { "CV_8U", "CV_8S", "CV_16U", "CV_16S", "CV_32S", "CV_32F", "CV_64F" };
-		cout << "- - - - - - - - - - - - - - - Image  Info - - - - - - - - - - - - - - -" << endl;
-		cout << "URL: " << image_url << endl;
-		cout << "rows: " << ori_image.rows << " cols: " << ori_image.cols << endl;
-		cout << "depth: " << depth_str[ori_image.depth()] << endl;
-		cout << "channels:  " << ori_image.channels() << endl;
-		cout << "element size: " << ori_image.elemSize() << endl;
-		cout << "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -" << endl << endl;
-	}
-
 	/* crop ROI */
-	Mat roi_image = ori_image(roi.row_range, roi.col_range);
-	// namedWindow("Display window", WINDOW_AUTOSIZE);
-	// imshow("Display window", roi_image);
-	// waitKey(0);
+	Mat roi_image = image(roi.row_range, roi.col_range);
 
-	/* Convert to float32 */
-	Mat float_image;
-	roi_image.convertTo(float_image, CV_32F);
-	
 	/* Resize image */
 	Mat resized_image;
-	resize(float_image, resized_image, Size(input_size, input_size));
+	resize(roi_image, resized_image, Size(input_size, input_size));
 
-	/* Covert image to torch tensor and preprocess */
-	int max_val;
-	if (ori_image.depth() == CV_8U) 
-	{
-		max_val = 255;
-	}
-	else if (ori_image.depth() == CV_16U) 
-	{
-		max_val = 65535;
-	}
-	else 
-	{
-		cerr << "ERROR: Image with unsupported depth: " << image_url << endl;
-		return nullptr;
-	}
 	torch::Tensor tensor_image =
 		torch::from_blob(resized_image.data, { 1, input_size, input_size, 3 }, torch::kFloat32)
 		.permute({ 0, 3, 1, 2 })
 		.toType(torch::kFloat)
-		.div(max_val)
 		.sub(this->mean)
 		.div(this->std);
 
@@ -130,101 +85,31 @@ shared_ptr<Pred> CellClassifier::predict_single(string image_url, const Roi &roi
 	return results;
 }
 
-shared_ptr<vector<NamedPred>> CellClassifier::predict_batch(string folder_url) 
+shared_ptr<Pred> CellClassifier::predict_single(string image_url, float saturation, bool verbose)
 {
-	auto results = make_shared<vector<NamedPred>>();
-
-	/* Get base directory length, for URL formatting */
-	auto base_length = folder_url.length();
-	if (folder_url[base_length - 1] != '\\') 
+	/* Read in image */
+	Mat ori_image = imread(image_url, IMREAD_GRAYSCALE | IMREAD_ANYDEPTH);
+	if (ori_image.data == nullptr)
 	{
-		base_length += 1;
+		cerr << "ERROR: Fail to open image: " << image_url << endl;
+		return nullptr;
 	}
 
-	/* Iterate and Infer */
-	for (auto& p : fs::recursive_directory_iterator(folder_url)) 
+	/* Print out image info if verbose is on */
+	if (verbose)
 	{
-		if (fs::is_directory(p.path())) 
-		{
-			continue;
-		}
-		else if (fs::is_regular_file(p.path())) 
-		{
-			NamedPred result;
-			cout << " - processing " << p.path().string() << '\n';
-			result.first = p.path().string().substr(base_length);
-			result.second = predict_single(p.path().string(), Roi(), false);
-			results->push_back(result);
-		}
-		else 
-		{
-			cerr << " Error: " << p.path() << " is not a regular file, skipping ..." << endl;
-			_sleep(err_gap / 2);
-			continue;
-		}
+		show_image_info(image_url, ori_image);
 	}
-	cout << endl;
-	return results;
-}
 
-string CellClassifier::repeat_str(const string &str, int times) 
-{
-	ostringstream builder;
-	for (int i = 0; i < times; i++) 
-	{
-		builder << str;
-	}
-	return builder.str();
-}
+	/* Enhance image based on histogram */
+	Mat enhanced_image = enhance_image(ori_image, saturation);
 
-void CellClassifier::print_batch_result_to_console(shared_ptr<vector<NamedPred>> results)
-{
-	/* Build helper strings */
-	int url_max_len = 0, field_len = 16;
-	for (const auto &iter : *results) 
-	{
-		auto this_length = iter.first.length();
-		if (this_length > url_max_len) 
-		{
-			url_max_len = this_length;
-		}
-	}
-	url_max_len += 4;
-	auto _field_border = "+-" + string(field_len, '-');
-	auto _border = "+-" + string(url_max_len, '-') + repeat_str(_field_border, 2) + "+ ";
-	int _bar_count = (_border.length() + 2 - _border.length() % 2) / 2;
-	auto _half_delimiter = repeat_str("- ", _bar_count / 2);
-	auto _full_delimiter = repeat_str("- ", _bar_count);
-	/* Format and output */
-	cout << _half_delimiter << "Results " << _half_delimiter << endl << endl;
-	cout << std::left;
-	cout << " " << _border << endl;
-	cout << " "
-		<< "| " << setw(url_max_len) << "File"
-		<< "| " << setw(field_len) << "Prediction"
-		<< "| " << setw(field_len) << "Confidence"
-		<< "| " << endl;
-	cout << " " << _border << endl;
-	int stats[3]{ 0, 0, 0 };
-	for (const auto &iter : *results) 
-	{
-		cout << " ";
-		cout << "| " << setw(url_max_len) << iter.first;
-		int pred = (iter.second)->first;
-		cout << "| " << setw(field_len) << class_names[pred];
-		cout << "| " << setw(field_len) << (iter.second)->second[pred];
-		cout << "| " << endl;
-		stats[pred]++;
-	}
-	cout << " " << _border << endl << endl;
-	double total = results->size();
-	cout << " " << results->size() << " images in total";
-	for (int i = 0; i < 3; i++) 
-	{
-		cout << ", " << stats[i] << " " << class_names[i] << " (" << 100 * stats[i] / total << "%)";
-	}
-	cout << "." << endl << endl;
-	cout << _full_delimiter << endl << endl;
+	/* Pad and normalize */
+	Mat padded_image, normalized_image;
+	cvtColor(enhanced_image, padded_image, COLOR_GRAY2BGR);
+	padded_image.convertTo(normalized_image, CV_32F, 1. / 255.);
+
+	return predict_single(normalized_image);
 }
 
 void CellClassifier::save_batch_result_to_csv(shared_ptr<vector<NamedPred>> results, string file_name)
@@ -247,6 +132,108 @@ void CellClassifier::save_batch_result_to_csv(shared_ptr<vector<NamedPred>> resu
 	}
 	fout.close();
 	cout << endl << "Results saved to " << file_path.string() << endl;
+}
+
+
+/*=================================================================================================================*/
+/*======================================= Legacy Code for Shell Applicaiton =======================================*/
+/*=================================================================================================================*/
+
+shared_ptr<vector<NamedPred>> CellClassifier::predict_batch(string folder_url, float saturation)
+{
+	auto results = make_shared<vector<NamedPred>>();
+
+	/* Get base directory length, for URL formatting */
+	auto base_length = folder_url.length();
+	if (folder_url[base_length - 1] != '\\')
+	{
+		base_length += 1;
+	}
+
+	/* Iterate and Infer */
+	for (auto& p : fs::recursive_directory_iterator(folder_url))
+	{
+		if (fs::is_directory(p.path()))
+		{
+			continue;
+		}
+		else if (fs::is_regular_file(p.path()))
+		{
+			NamedPred result;
+			cout << " - processing " << p.path().string() << '\n';
+			result.first = p.path().string().substr(base_length);
+			result.second = predict_single(p.path().string(), saturation);
+			results->push_back(result);
+		}
+		else
+		{
+			cerr << " Error: " << p.path() << " is not a regular file, skipping ..." << endl;
+			_sleep(err_gap / 2);
+			continue;
+		}
+	}
+	cout << endl;
+	return results;
+}
+
+string CellClassifier::repeat_str(const string &str, int times)
+{
+	ostringstream builder;
+	for (int i = 0; i < times; i++)
+	{
+		builder << str;
+	}
+	return builder.str();
+}
+
+void CellClassifier::print_batch_result_to_console(shared_ptr<vector<NamedPred>> results)
+{
+	/* Build helper strings */
+	int url_max_len = 0, field_len = 16;
+	for (const auto &iter : *results)
+	{
+		auto this_length = iter.first.length();
+		if (this_length > url_max_len)
+		{
+			url_max_len = this_length;
+		}
+	}
+	url_max_len += 4;
+	auto _field_border = "+-" + string(field_len, '-');
+	auto _border = "+-" + string(url_max_len, '-') + repeat_str(_field_border, 2) + "+ ";
+	int _bar_count = (_border.length() + 2 - _border.length() % 2) / 2;
+	auto _half_delimiter = repeat_str("- ", _bar_count / 2);
+	auto _full_delimiter = repeat_str("- ", _bar_count);
+	/* Format and output */
+	cout << _half_delimiter << "Results " << _half_delimiter << endl << endl;
+	cout << std::left;
+	cout << " " << _border << endl;
+	cout << " "
+		<< "| " << setw(url_max_len) << "File"
+		<< "| " << setw(field_len) << "Prediction"
+		<< "| " << setw(field_len) << "Confidence"
+		<< "| " << endl;
+	cout << " " << _border << endl;
+	int stats[3]{ 0, 0, 0 };
+	for (const auto &iter : *results)
+	{
+		cout << " ";
+		cout << "| " << setw(url_max_len) << iter.first;
+		int pred = (iter.second)->first;
+		cout << "| " << setw(field_len) << class_names[pred];
+		cout << "| " << setw(field_len) << (iter.second)->second[pred];
+		cout << "| " << endl;
+		stats[pred]++;
+	}
+	cout << " " << _border << endl << endl;
+	double total = results->size();
+	cout << " " << results->size() << " images in total";
+	for (int i = 0; i < 3; i++)
+	{
+		cout << ", " << stats[i] << " " << class_names[i] << " (" << 100 * stats[i] / total << "%)";
+	}
+	cout << "." << endl << endl;
+	cout << _full_delimiter << endl << endl;
 }
 
 void CellClassifier::run_shell(void)
@@ -293,7 +280,7 @@ void CellClassifier::run_shell(void)
 		if (fs::is_regular_file(input_url)) 
 		{
 			/* Infer */
-			auto results = predict_single(input_url, Roi(), true);
+			auto results = predict_single(input_url, 0.0035);
 			if (results == nullptr) 
 			{
 				_sleep(err_gap);

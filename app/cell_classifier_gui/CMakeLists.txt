@@ -3,7 +3,7 @@
 #
 cmake_minimum_required (VERSION 3.8)
 
-set(CMAKE_PREFIX_PATH "C:\\Applications\\Qt-crap\\5.12.2\\msvc2017_64;C:\\Users\\mwb\\Documents\\VS Projects\\Library\\libtorch;C:\\Users\\mwb\\Documents\\VS Projects\\Library\\opencv\\build")
+set(CMAKE_PREFIX_PATH "C:\\Applications\\Qt\\5.12.2\\msvc2017_64;C:\\Users\\Meng5th\\Documents\\Library\\libtorch;C:\\Users\\Meng5th\\Documents\\Library\\opencv\\build")
 
 # Find includes in corresponding build directories
 set(CMAKE_INCLUDE_CURRENT_DIR ON)
@@ -19,10 +19,18 @@ find_package(OpenCV REQUIRED)
 
 # Populate a CMake variable with the sources
 set(cell_classifier_gui_SRCS
-    mainwindow.ui
-    mainwindow.cpp
     main.cpp
+	mainwindow.ui
+	mainwindow.h
+    mainwindow.cpp
+	CellClassifier.h
 	CellClassifier.cpp
+	CellSegmenter.h
+	CellSegmenter.cpp
+	CellProcessor.h
+	CellProcessor.cpp
+	utils.h
+	utils.cpp
 )
 # Tell CMake to create the helloworld executable
 #add_executable(cell_classifier_gui WIN32 ${cell_classifier_gui_SRCS})

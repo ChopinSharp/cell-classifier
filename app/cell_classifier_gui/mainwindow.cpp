@@ -47,7 +47,10 @@ QChart *create_bar_chart(double fg_conf, double hf_conf, double wt_conf)
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent),
     ui(new Ui::MainWindow),
-	classifier(R"(models\classification\squeezenet%Sun Mar 31 17#59#37 2019%0.677%0.12210%0.14149.pt)")
+	processor(
+		R"(models\classification\squeezenet%Sun Mar 31 17#59#37 2019%0.677%0.12210%0.14149.pt)",
+		R"(models\segmentation\UNetVggVar0512.pt)"
+	)
 {
     ui->setupUi(this);
 
@@ -73,42 +76,59 @@ MainWindow::MainWindow(QWidget *parent) :
 	ui->statusBar->addPermanentWidget(progress_bar);
 	ui->statusBar->showMessage(QString("Ready."));
 
+	/* Setup radio button */
+	ui->radioButtonOri->setEnabled(false);
+	ui->radioButtonEnh->setEnabled(false);
+	ui->radioButtonSeg->setEnabled(false);
+
+
 	/* Setup thread for batch inference */
-	batch_predictor.moveToThread(&batch_thread);
-	batch_thread.start();
+	processor.moveToThread(&thread);
+	thread.start();
 
 	/* Connect signals and slots */
-	qRegisterMetaType<CellClassifier>("CellClassifier");
+	/* sync prediction result with chart and lables */
 	connect(this, &MainWindow::prediction_changed, this, &MainWindow::label_on_prediction_changed);
 	connect(this, &MainWindow::prediction_changed, this, &MainWindow::chart_on_prediction_changed);
-	connect(&batch_predictor, &BatchPredictor::update_progress_bar, this, &MainWindow::when_update_progress_bar);
-	connect(&batch_predictor, &BatchPredictor::update_status_bar, this, &MainWindow::when_update_status_bar);
-	connect(&batch_predictor, &BatchPredictor::result_ready, this, &MainWindow::when_result_ready);
-	connect(this, &MainWindow::save_result_to_file, &batch_predictor, &BatchPredictor::when_save_result_to_file);
-	connect(this, &MainWindow::start_batch_prediction, &batch_predictor, &BatchPredictor::when_start_batch_predicton);
-
+	/* batch prediction */
+	connect(&processor, &CellProcessor::update_progress_bar, this, &MainWindow::when_update_progress_bar);
+	connect(&processor, &CellProcessor::update_status_bar,   this, &MainWindow::when_update_status_bar);
+	connect(&processor, &CellProcessor::cls_result_ready,    this, &MainWindow::when_cls_result_ready);
+	connect(this, &MainWindow::save_results_to_file, &processor, &CellProcessor::save_results_to_file);
+	connect(this, &MainWindow::start_batch_predict,  &processor, &CellProcessor::predict_batch);
+	/* segmentation */
+	connect(this, &MainWindow::start_infer, &processor, &CellProcessor::start_infer);
+	connect(&processor, &CellProcessor::seg_result_ready, this, &MainWindow::when_seg_result_ready);
 }
 
 MainWindow::~MainWindow()
 {
     delete ui;
-	batch_thread.quit();
-	batch_thread.wait();
+	thread.quit();
+	thread.wait();
 }
 
 void MainWindow::on_actionOpenImage_triggered()
 {
-	/* read in file name */
-	auto tmp_str = QFileDialog::getOpenFileName(
-		this, tr("Open Image"), "", tr("Image Files (*.tif *.tiff *.jpg)"));
-	if (tmp_str.isNull())
+	/* Read in file name */
+	auto file_name = QFileDialog::getOpenFileName(
+		this, tr("Open Image"), "", tr("Image Files (*.tif *.tiff *.jpg)")
+	);
+	if (file_name.isNull())
 	{
 		ui->statusBar->showMessage(QString("No image opened, canceled by user."));
 		return;
 	}
-	this->file_name = tmp_str;
+	setWindowTitle(file_name + " - Cell Classifier GUI");
+	qDebug() << "file selected: " << file_name;
 
-	/* remove old roi box */
+	/* Disable radio buttons */
+	ui->radioButtonOri->setEnabled(false);
+	ui->radioButtonEnh->setEnabled(false);
+	ui->radioButtonSeg->setEnabled(false);
+	ui->menuFile->setEnabled(false);
+
+	/* Remove old roi box */
 	if (rect_item != nullptr)
 	{
 		this->scene->removeItem(this->rect_item);
@@ -116,19 +136,28 @@ void MainWindow::on_actionOpenImage_triggered()
 		rect_item = nullptr;
 	}
 
-	/* load and show image */
-	setWindowTitle(file_name + " - Cell Classifier GUI");
-    qDebug() << "file selected: " << file_name;
-    this->img->setPixmap(QPixmap(file_name));
+	/* Load image with processor object */
+	this->processor.load_image(file_name.toStdString());
+
+	/* Construct QPixmap objects and enable radio buttons */
+	auto original_mat = this->processor.get_original_image();
+	this->original_pixmap = QPixmap::fromImage(QImage(original_mat.data, original_mat.cols, original_mat.rows, QImage::Format_Grayscale8));
+	auto enhanced_mat = this->processor.get_enhanced_image();
+	this->enhanced_pixmap = QPixmap::fromImage(QImage(enhanced_mat.data, enhanced_mat.cols, enhanced_mat.rows, QImage::Format_Grayscale8));
+	ui->radioButtonOri->setEnabled(true);
+	ui->radioButtonEnh->setEnabled(true);
+
+	/* Display orignal image by default */
+	ui->radioButtonOri->setChecked(true);
+	this->img->setPixmap(original_pixmap);
     this->scene->setSceneRect(0, 0, img->pixmap().width(), img->pixmap().height());
-    this->has_image = true;
 	const QString message = tr("Opened \"%1\", %2x%3, Depth: %4")
 		.arg(QDir::toNativeSeparators(file_name))
 		.arg(img->pixmap().width()).arg(img->pixmap().height()).arg(img->pixmap().depth());
 	ui->statusBar->showMessage(message);
 
-	/* make prediction */
-	auto pred = this->classifier.predict_single(file_name.toStdString(), Roi(), true);
+	/* Do classification */
+	auto pred = this->processor.predict_single();
 	if (pred != nullptr)
 	{
 		/* update UI */
@@ -137,36 +166,60 @@ void MainWindow::on_actionOpenImage_triggered()
 	}
 	else
 	{
-		ui->statusBar->showMessage("Fail to infer on \"" + this->file_name + "\".");
+		ui->statusBar->showMessage("Fail to infer on \"" + file_name + "\".");
 	}
+
+	/* Do segmentation */
+	emit start_infer();
 }
 
 void MainWindow::on_actionOpenFolder_triggered()
 {
-	predict_batch();
+	qDebug() << "in MainWindow::on_actionOpenFolder_triggered";
+	ui->menuFile->setEnabled(false);
+	QString dir = QFileDialog::getExistingDirectory(this, tr("Open Directory"));
+	if (dir.isNull())
+	{
+		ui->statusBar->showMessage(QString("Batch inference aborted."));
+		return;
+	}
+	qDebug() << "folder selected: " << dir;
+	string folder_url = dir.toStdString();
+
+	int total = 0;
+	for (auto& p : fs::recursive_directory_iterator(folder_url)) total++;
+
+	/* Prepare progress bar */
+	progress_bar->setMaximum(total);
+	progress_bar->setMinimum(0);
+	progress_bar->setValue(0);
+	progress_bar->show();
+
+	emit start_batch_predict(QString::fromStdString(folder_url));
 }
 
 void MainWindow::on_radioButtonOri_clicked()
 {
 	qDebug() << "show original";
-
+	this->img->setPixmap(this->original_pixmap);
 }
 
 void MainWindow::on_radioButtonEnh_clicked()
 {
 	qDebug() << "show enhanced";
-
+	this->img->setPixmap(this->enhanced_pixmap);
 }
 
 void MainWindow::on_radioButtonSeg_clicked()
 {
-	qDebug() << "show segmentation";
+	qDebug() << "show segmented";
+	this->img->setPixmap(this->segmented_pixmap);
 }
 
 void MainWindow::on_graphicsView_rubberBandChanged(const QRect &viewportRect, const QPointF &fromScenePoint, const QPointF &toScenePoint)
 {
     /* no image loaded */
-    if (!has_image) return ;
+    if (!(this->processor.has_image)) return ;
 
     /* selection done */
     if (viewportRect.isNull())
@@ -193,8 +246,7 @@ void MainWindow::on_graphicsView_rubberBandChanged(const QRect &viewportRect, co
         {
             sl_rect.setTop(0);
         }
-        // qDebug() << sl_rect;
-		// qDebug() << sl_rect.top() << " " << sl_rect.bottom() << " " << sl_rect.left() << " " << sl_rect.right();
+        qDebug() << sl_rect;
 		ui->statusBar->showMessage(
 			tr("Infer on area: (%1,%2) %3x%4.")
 			.arg(sl_rect.left())
@@ -215,11 +267,7 @@ void MainWindow::on_graphicsView_rubberBandChanged(const QRect &viewportRect, co
         this->rect_item = this->scene->addRect(this->sl_rect, QPen(Qt::yellow));
 
 		/* make prediction to selection area */
-		auto pred = this->classifier.predict_single(
-			file_name.toStdString(),
-			Roi(sl_rect.top(), sl_rect.bottom(), sl_rect.left(), sl_rect.right()), 
-			true
-		);
+		auto pred = this->processor.predict_single(Roi(sl_rect.top(), sl_rect.bottom(), sl_rect.left(), sl_rect.right()));
 		double fg_conf = pred->second[0], hf_conf = pred->second[1], wt_conf = pred->second[2];
 		
 		/* update UI */
@@ -268,124 +316,19 @@ void MainWindow::when_update_status_bar(QString info)
 	ui->statusBar->showMessage(info);
 }
 
-void MainWindow::when_result_ready()
+void MainWindow::when_cls_result_ready()
 {
 	qDebug() << "in MainWindow::on_result_ready";
 	QString file_name = QFileDialog::getSaveFileName(this, tr("Save to"), "", tr("CSV File (*.csv)"));
 	qDebug() << file_name;
-	emit save_result_to_file(file_name);
+	emit save_results_to_file(file_name);
 	progress_bar->hide();
-
+	ui->menuFile->setEnabled(true);
 }
 
-void MainWindow::predict_batch()
+void MainWindow::when_seg_result_ready(QPixmap result)
 {
-	qDebug() << "in predict_batch";
-	QString dir = QFileDialog::getExistingDirectory(this, tr("Open Directory"));
-	if (dir.isNull())
-	{
-		ui->statusBar->showMessage(QString("Batch inference aborted."));
-		return ;
-	}
-	qDebug() << "folder selected: " << dir;
-	string folder_url = dir.toStdString();
-
-	int total = 0;
-	for (auto& p : fs::recursive_directory_iterator(folder_url)) total++;
-
-	/* Prepare progress bar */
-	progress_bar->setMaximum(total);
-	progress_bar->setMinimum(0);
-	progress_bar->setValue(0);
-	progress_bar->show(); 
-
-	emit start_batch_prediction(this->classifier, QString::fromStdString(folder_url));
+	this->segmented_pixmap = result;
+	ui->radioButtonSeg->setEnabled(true);
+	ui->menuFile->setEnabled(true);
 }
-
-void BatchPredictor::when_start_batch_predicton(CellClassifier classifier, QString q_folder_url)
-{
-	string folder_url = q_folder_url.toStdString();
-	qDebug() << "in BatchPredictor::on_start_batch_predicton";
-	this->results = std::make_shared<std::vector<NamedPred>>();
-
-	/* Get base directory length, for URL formatting */
-	auto base_length = folder_url.length();
-	if (folder_url[base_length - 1] != '\\')
-	{
-		base_length += 1;
-	}
-
-	/* Iterate and Infer */
-	int progress = 1;
-	for (auto& p : fs::recursive_directory_iterator(folder_url))
-	{
-
-		if (fs::is_directory(p.path()))
-		{
-			// skip directory entry
-		}
-		else if (fs::is_regular_file(p.path()))
-		{
-			auto relative_url = p.path().string().substr(base_length);
-			emit update_status_bar(QString::fromStdString("Running batch inference - processing \"" + relative_url + "\""));
-
-			auto pred = classifier.predict_single(p.path().string(), Roi(), false);
-			if (pred != nullptr)
-			{
-				NamedPred result;
-				result.first = relative_url;
-				result.second = pred;
-				this->results->push_back(result);
-			}
-			else
-			{
-				// TODO ... single inference failed ...
-			}
-		}
-		else
-		{
-			// unlikely to reach, no action taken ...
-		}
-		emit update_progress_bar(++progress);
-	}
-	emit update_status_bar(QString("Batch inference complete."));
-	emit result_ready();
-}
-
-void BatchPredictor::when_save_result_to_file(QString q_file_name)
-{
-	qDebug() << "in BatchPredictor::on_save_result_to_file";
-	if (q_file_name.isNull())
-	{
-		emit update_status_bar(QString("Results unsaved, canceled by user."));
-		return;
-	}
-	string file_name = q_file_name.toStdString();
-	std::ofstream fout(file_name);
-	int count[3]{ 0, 0, 0 };
-	/* Header */
-	fout << "File, Prediction, Fragmented, Hyperfused, WT\n";
-	/* Content */
-	for (const auto &iter : *results)
-	{
-		count[(iter.second)->first]++;
-		fout << iter.first << ", " << CellClassifier::class_names[(iter.second)->first];
-		for (int i = 0; i < 3; i++)
-		{
-			fout << ", " << (iter.second)->second[i];
-		}
-		fout << "\n";
-	}
-	/* Statistics */
-	auto total = count[0] + count[1] + count[2];
-	fout << "\"[ CONCLUSION ] " << total << " images in total";
-	for (int i = 0; i < 3; i++)
-	{
-		fout << ", " << count[i] << " " << CellClassifier::class_names[i]
-			<< " (" << 100 * count[i] / total << "%)";
-	}
-	fout << ".\"\n";
-	fout.close();
-	emit update_status_bar(QString::fromStdString("Results saved to \"" + file_name + "\""));
-}
-

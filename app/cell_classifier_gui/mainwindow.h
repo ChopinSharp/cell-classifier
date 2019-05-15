@@ -3,41 +3,14 @@
 
 #include <QMainWindow>
 #include <QGraphicsPixmapItem>
-#include "CellClassifier.h"
 #include <QProgressBar>
 #include <QtCharts>
+#include "CellProcessor.h"
 QT_CHARTS_USE_NAMESPACE
 
 namespace Ui {
 	class MainWindow;
 }
-
-class BatchPredictor : public QObject
-{
-	Q_OBJECT
-
-public:
-	BatchPredictor() : results(nullptr) {}
-
-public slots:
-	void when_start_batch_predicton(CellClassifier classifier, QString q_folder_url);
-	void when_save_result_to_file(QString q_file_name);
-
-signals:
-	void update_progress_bar(int progress);
-	void update_status_bar(QString info);
-	void result_ready();
-
-private:
-	shared_ptr<std::vector<NamedPred>> results;
-};
-
-/*
-class Segmenter : public QObject
-{
-
-};
-*/
 
 class MainWindow : public QMainWindow
 {
@@ -46,9 +19,6 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
-
-private:
-	void predict_batch();
 
 private slots:
     void on_actionOpenImage_triggered();
@@ -61,26 +31,28 @@ private slots:
 	void chart_on_prediction_changed(int pred, double fg_conf, double hf_conf, double wt_conf);
 	void when_update_progress_bar(int progress);
 	void when_update_status_bar(QString info);
-	void when_result_ready();
+	void when_cls_result_ready();
+	void when_seg_result_ready(QPixmap result);
 
 signals:
 	void prediction_changed(int pred, double fg_conf, double hf_conf, double wt_conf);
-	void start_batch_prediction(CellClassifier classifier, QString q_folder_url);
-	void save_result_to_file(QString file_name);
+	void start_batch_predict(QString q_folder_url);
+	void save_results_to_file(QString q_file_name);
+	void start_infer();
 
 private:
     Ui::MainWindow *ui;
+	CellProcessor processor;
+	QThread thread;
     QGraphicsPixmapItem *img;
     QGraphicsScene *scene;
     QRect sl_rect;
     QGraphicsRectItem *rect_item = nullptr;
-	QString file_name;
 	QChart *chart;
 	QProgressBar *progress_bar;
-    bool has_image = false;
-	CellClassifier classifier;
-	QThread batch_thread;
-	BatchPredictor batch_predictor;
+	QPixmap original_pixmap;
+	QPixmap enhanced_pixmap;
+	QPixmap segmented_pixmap;
 };
 
 
