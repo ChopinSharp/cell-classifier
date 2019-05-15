@@ -401,10 +401,7 @@ def main():
         batch_size=16
     )
     model.to('cpu')
-    if isinstance(model, torch.jit.ScriptModule):
-        model.save(os.path.abspath('../results/saved_scripts/%s %s.pt' % (repr(model), timestamp)))
-    else:
-        torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))
+    torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))
 
     print('\ndone')
 

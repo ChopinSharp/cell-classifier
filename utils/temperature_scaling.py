@@ -5,7 +5,6 @@ from utils.misc import using_device
 
 
 def compute_temperature(model, val_loader=None, verbose=False):
-    model = model.to('cpu')
 
     temperature = torch.tensor(1.0, requires_grad=True)
 
@@ -55,7 +54,6 @@ def compute_temperature(model, val_loader=None, verbose=False):
         print('+ Before temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_before_scaling, ece_before_scaling))
         print('+ After temperature scaling - NLL: %.3f, ECE: %.3f' % (nll_after_scaling, ece_after_scaling))
 
-    model.to(using_device)
     return opt_temperature
 
 

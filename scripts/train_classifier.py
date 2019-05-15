@@ -182,8 +182,6 @@ def test_model(model, dataloader, is_inception=False):
 
     # Iterate over data.
     for inputs, labels in iter(dataloader):
-        inputs = inputs.to(using_device)
-        labels = labels.to(using_device)
 
         # forward, track history if only in train
         with torch.no_grad():
@@ -204,7 +202,7 @@ def test_model(model, dataloader, is_inception=False):
     return test_acc, avg_conf
 
 
-def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir='../results/saved_models',
+def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir=None,
                    model_name='squeezenet', num_classes=3, batch_size=8, num_epochs=50, feature_extract=True,
                    learning_rates=(1e-3,), weight_decays=(1e-5,), viz=None):
     """Train and validate chosen model with set(s) of hyper-parameters, plot the training process,
@@ -334,6 +332,8 @@ def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir='.
     print('Training complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
     print('Model at lr=%e, wd=%e has the highest val acc: %.4f' % (best_lr, best_wd, best_val_acc))
 
+    best_model.to('cpu')
+
     # Temperature scaling
     print('\nComputing temperature ...')
     temperature = compute_temperature(best_model, dataloaders['val'], verbose=True)
@@ -350,6 +350,8 @@ def validate_model(data_dir, script_dir='../results/saved_scripts', model_dir='.
     if script_dir:
         # Convert to torch script for inference efficiency
         best_model = convert_to_torch_script(best_model, available_models_input_size[model_name])
+        test_acc, _ = test_model(best_model, dataloaders['test'])
+        print('\nSanity check for sciprt module: Test Acc: %.4f' % test_acc)
         os.makedirs(script_dir, exist_ok=True)
         print('\nSaving model ...')
         info_list = [
@@ -390,8 +392,9 @@ def convert_to_torch_script(model, input_size):
 
 
 def main():
-    validate_model('../datasets/data0229', model_name='squeezenet', viz=None, num_epochs=30,
-                   feature_extract=True)
+    validate_model('../datasets/data0229_enhanced', model_name='squeezenet', viz=None, num_epochs=60,
+                   learning_rates=(5e-5,),
+                   feature_extract=False)
 
 
 if __name__ == '__main__':
