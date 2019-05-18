@@ -13,12 +13,15 @@ class CellSegmenter
 {
 public:
 	CellSegmenter() {}
-	CellSegmenter(string model_url, bool verbose = false);
+	CellSegmenter(string folder_url, bool verbose = false);
 	Mat infer(const Mat &image);
+	const Mat &get_heat_map_wt() { return heat_map_wt; }
+	const Mat &get_heat_map_fg() { return heat_map_fg; }
+	const Mat &get_heat_map_hf() { return heat_map_hf; }
 
 private:
 	shared_ptr<torch::jit::script::Module> module;
-
-public:
-	static const Vec3b palette[4];
+	Mat heat_map_wt;
+	Mat heat_map_fg;
+	Mat heat_map_hf;
 };

@@ -32,9 +32,10 @@ set(cell_classifier_gui_SRCS
 	utils.h
 	utils.cpp
 )
+
 # Tell CMake to create the helloworld executable
-#add_executable(cell_classifier_gui WIN32 ${cell_classifier_gui_SRCS})
-add_executable(cell_classifier_gui ${cell_classifier_gui_SRCS})
+add_executable(cell_classifier_gui WIN32 ${cell_classifier_gui_SRCS})
+# add_executable(cell_classifier_gui ${cell_classifier_gui_SRCS})
 # Use the Widgets module from Qt 5
 target_link_libraries(cell_classifier_gui Qt5::Widgets Qt5::Charts ${TORCH_LIBRARIES} ${OpenCV_LIBS})
 set_property(TARGET cell_classifier_gui PROPERTY CXX_STANDARD 17)

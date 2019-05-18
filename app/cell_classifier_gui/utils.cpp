@@ -31,13 +31,12 @@ Mat enhance_image(const Mat &ori_image, float saturation)
 	hist /= ori_image.rows * ori_image.cols;  // normalize histogram
 
 	/* For debug only */
-	float _total = 0;
-	for (auto iter = hist.begin<float>(); iter != hist.end<float>(); iter++)
-	{
-		// cout << " * " << *iter << endl;
-		_total += *iter;
-	}
-	cout << "utils.h: enhance_image: hist sanity check, total: " << _total << endl;
+	// float _total = 0;
+	// for (auto iter = hist.begin<float>(); iter != hist.end<float>(); iter++)
+	// {
+	// 	_total += *iter;
+	// }
+	// cout << "utils.h: enhance_image: hist sanity check, total: " << _total << endl;
 
 	/* Calculate parameters for enhancement */
 	float cur_sat = 0;

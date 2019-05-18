@@ -9,6 +9,8 @@ using namespace cv;
 using namespace std;
 namespace fs = std::filesystem;
 
+const Vec3b CellProcessor::palette[]{ {0, 0, 0}, {255, 0, 0}, {0, 255, 0}, {0, 0, 255} };
+
 /* Load image and fill in original_image, enhanced_image and normalized_image fileds */
 void CellProcessor::load_image(string image_url, bool verbose)
 {
@@ -28,6 +30,7 @@ void CellProcessor::load_image(string image_url, bool verbose)
 
 	this->image_url = image_url;
 	this->has_image = true;
+	this->has_seg_result = false;
 
 	/* Check image depth, fill in original_image for display */
 	if (ori_image.depth() == CV_8U)
@@ -135,9 +138,70 @@ void CellProcessor::save_results_to_file(QString q_file_name)
 	emit update_status_bar(QString::fromStdString("Results saved to \"" + file_name + "\""));
 }
 
-void CellProcessor::start_infer()
+inline QPixmap bgr_mat_to_rgb_pixmap(const Mat &mat)
 {
-	Mat result = segmenter.infer(this->normalized_image);
-	emit seg_result_ready(QPixmap::fromImage(QImage(result.data, result.cols, result.rows, QImage::Format_RGB888)));
+	return QPixmap::fromImage(
+		QImage(
+			mat.data, mat.cols, mat.rows, QImage::Format_RGB888
+		).rgbSwapped()
+	);
 }
 
+void CellProcessor::set_segmentation_map(bool fg, bool hf, bool wt)
+{
+	cout << "CellProcessor::set_segmentation_map: " << fg << " " << hf << " " << wt << endl;
+	seg_map.create(probs_mat.rows, probs_mat.cols, CV_8SC3);
+	bool enabled[]{ true, wt, fg, hf };
+	for (int i = 0; i < probs_mat.rows; i++)
+	{
+		for (int j = 0; j < probs_mat.cols; j++)
+		{
+			auto pix_scores = probs_mat.at<Vec4f>(i, j);
+			// 0: bg, 1: wt, 2: fg, 3: hf
+			auto max_score = pix_scores[0];
+			int max_index = 0;
+			for (int c = 1; c < 4; c++)
+			{
+				if (enabled[c] && pix_scores[c] > max_score)
+				{
+					max_score = pix_scores[c];
+					max_index = c;
+				}
+			}
+			seg_map.at<Vec3b>(i, j) = CellProcessor::palette[max_index];
+		}
+	}
+}
+
+void CellProcessor::start_infer(bool fg, bool hf, bool wt)
+{
+	probs_mat = segmenter.infer(this->normalized_image);
+	set_segmentation_map(fg, hf, wt);
+	has_seg_result = true;
+	emit seg_result_ready();
+	emit wt_heat_map_ready(bgr_mat_to_rgb_pixmap(segmenter.get_heat_map_wt()));
+	emit fg_heat_map_ready(bgr_mat_to_rgb_pixmap(segmenter.get_heat_map_fg()));
+	emit hf_heat_map_ready(bgr_mat_to_rgb_pixmap(segmenter.get_heat_map_hf()));
+}
+
+Seg_Proportion CellProcessor::calculate_proportion(
+	bool fg_enabled, bool hf_enabled, bool wt_enabled, const Roi &roi)
+{
+	// cerr << "CellProcessor::calculate_proportion: " << fg_enabled << " " << hf_enabled << " " << wt_enabled << endl;
+	Mat roi_seg = seg_map(roi.row_range, roi.col_range);
+	int fg = 0, hf = 0, wt = 0;
+	for (int i = 0; i < roi_seg.rows; i++)
+	{
+		for (int j = 0; j < roi_seg.cols; j++)
+		{
+			auto pix = roi_seg.at<Vec3b>(i, j);
+			if (wt_enabled && pix[0] > 127)
+				wt++;
+			else if (fg_enabled && pix[1] > 127)
+				fg++;
+			else if (hf_enabled && pix[2] > 127)
+				hf++;
+		}
+	}
+	return Seg_Proportion(fg, hf, wt);
+}

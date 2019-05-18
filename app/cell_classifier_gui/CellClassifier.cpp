@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <sstream>
 #include <filesystem>
+#include <stdexcept>
 
 using namespace std;
 using namespace cv;
@@ -15,21 +16,32 @@ const unsigned long err_gap = 800;
 
 const string CellClassifier::class_names[]{ "Fragmented", "Hyperfused", "WT" };
 
-CellClassifier::CellClassifier(string model_url, bool verbose)
+CellClassifier::CellClassifier(string folder_url, bool verbose)
 {
-	/* Load model */
-	if (!fs::exists(model_url))
+	string model_url;
+	try
 	{
-		cerr << "FATAL ERROR: Model not found, exiting ..." << endl;
+		auto dir_iter = fs::directory_iterator(folder_url);
+		if (dir_iter == fs::end(dir_iter))
+		{
+			throw runtime_error("No classifier model file under " + folder_url);
+		}
+		model_url = dir_iter->path().string();
+	}
+	catch (const runtime_error &e)
+	{
+		cerr << string("Fatal Error: Unable to find classifier model file: ") + e.what() << endl;
 		system("pause");
 		exit(1);
 	}
+
+	/* Load model */
 	this->module = torch::jit::load(model_url);
 	if (this->module == nullptr)
 	{
-		cerr << "FATAL ERROR: Fail to load model at " << model_url << ", exiting ..." << endl;
+		cerr << "Fatal Error: Fail to load model at " << model_url << ", exiting ..." << endl;
 		system("pause");
-		exit(2);
+		exit(1);
 	}
 
 	/* Some crappy logic to get the params cause C++ don't have a f**king split */
@@ -48,8 +60,12 @@ CellClassifier::CellClassifier(string model_url, bool verbose)
 	this->std = stod(model_url.substr(pos_4 + 1));
 	if (verbose)
 	{
-		cout << "[Model Info] Time: " << time << " temperature: " << temperature
-			 << " mean: " << mean << " std: " << std << endl;
+		cout << "[ Classifier Model Info ] " << endl;
+		cout << "* Loc: " << model_url << endl;
+		cout << "* Time: " << time << endl;
+		cout << "* Temperature: " << temperature << endl;
+		cout << "* Mean: " << mean << endl;
+		cout << "* Std: " << std << endl;
 	}
 }
 

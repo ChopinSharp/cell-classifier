@@ -5,27 +5,20 @@
 #include <torch/torch.h>
 #include <opencv2/opencv.hpp>
 #include <QObject>
+#include "utils.h"
 
 using std::shared_ptr;
 using std::pair;
 using std::vector;
-using cv::Range;
 using cv::Mat;
 
 typedef pair<int, vector<float>> Pred;
 typedef pair<string, shared_ptr<Pred>> NamedPred;
 
-struct Roi
-{
-	Range row_range, col_range;
-	Roi(): row_range(Range::all()), col_range(Range::all()) {}
-	Roi(int top, int bottom, int left, int right): row_range(top, bottom + 1), col_range(left, right + 1)  {}
-};
-
 class CellClassifier
 {
 public:
-	CellClassifier(string model_url, bool verbose=false);
+	CellClassifier(string folder_url, bool verbose=true);
 	shared_ptr<Pred> predict_single(const Mat &image, const Roi &roi = Roi());
 	shared_ptr<Pred> predict_single(string image_url, float saturation, bool verbose=false);
 	shared_ptr<vector<NamedPred>> predict_batch(string folder_url, float saturation=0.0035);
