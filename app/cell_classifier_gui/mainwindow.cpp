@@ -294,17 +294,9 @@ void MainWindow::update_segmentation_pixmap_and_proportion_chart()
 		{
 			this->img->setPixmap(this->segmented_pixmap);
 		}
-		if (ui->fg_enabled->isChecked() || ui->hf_enabled->isChecked() || ui->wt_enabled->isChecked())
-		{
-			auto proportion = processor.calculate_proportion(
-				ui->fg_enabled->isChecked(), ui->hf_enabled->isChecked(), ui->wt_enabled->isChecked(), current_roi);
-			emit proportion_changed(proportion.fg, proportion.hf, proportion.wt);
-		}
-		else
-		{
-			ui->chartView2->setChart(new QChart());
-		}
-		
+		auto proportion = processor.calculate_proportion(
+			ui->fg_enabled->isChecked(), ui->hf_enabled->isChecked(), ui->wt_enabled->isChecked(), current_roi);
+		emit proportion_changed(proportion.fg, proportion.hf, proportion.wt);
 	}
 }
 
@@ -383,7 +375,7 @@ void MainWindow::on_graphicsView_rubberBandChanged(const QRect &viewportRect, co
 		emit prediction_changed(pred->first, fg_conf, hf_conf, wt_conf);
 
 		/* if segmentation has been done, calculate statistics */
-		if (processor.has_seg_result && (ui->fg_enabled->isChecked() || ui->hf_enabled->isChecked() || ui->wt_enabled->isChecked()))
+		if (processor.has_seg_result)
 		{
 			auto proportion = processor.calculate_proportion(
 				ui->fg_enabled->isChecked(), ui->hf_enabled->isChecked(), ui->wt_enabled->isChecked(), current_roi);
@@ -460,11 +452,16 @@ QChart *create_pie_chart(double fg, double hf, double wt)
 	series->append(format_percentage_info("Hyperfused", hf), hf);
 	series->append(format_percentage_info("WT", wt), wt);
 	
+	QChart *chart = new QChart();
+	if (series->slices().length() != 3)
+	{
+		return chart;
+	}
+
 	series->slices().at(0)->setBrush(Qt::green);
 	series->slices().at(1)->setBrush(Qt::blue);
 	series->slices().at(2)->setBrush(Qt::red);
 
-	QChart *chart = new QChart();
 	chart->addSeries(series);
 	chart->setTitle("Pie Chart of Proportion");
 	chart->setTitleFont(QFont("Microsoft YaHei UI", 15, QFont::Bold));
@@ -510,13 +507,9 @@ void MainWindow::when_seg_result_ready()
 	ui->load_label->hide();
 	processor.set_segmentation_map(ui->fg_enabled->isChecked(), ui->hf_enabled->isChecked(), ui->wt_enabled->isChecked());
 	this->segmented_pixmap = processor.get_segmentation_pixmap();
-	if (ui->fg_enabled->isChecked() || ui->hf_enabled->isChecked() || ui->wt_enabled->isChecked())
-	{
-		/* WARNING: when none of the three check boxes is checked, emit the following signal will trigger a CRASH */
-		/* WARNING: call to calculate_proportion should be after the call to set_segmentation_map */
-		auto proportion = processor.calculate_proportion(ui->fg_enabled->isChecked(), ui->hf_enabled->isChecked(), ui->wt_enabled->isChecked());
-		emit proportion_changed(proportion.fg, proportion.hf, proportion.wt);
-	}
+	/* WARNING: call to calculate_proportion should be after the call to set_segmentation_map */
+	auto proportion = processor.calculate_proportion(ui->fg_enabled->isChecked(), ui->hf_enabled->isChecked(), ui->wt_enabled->isChecked());
+	emit proportion_changed(proportion.fg, proportion.hf, proportion.wt);
 	ui->radioButtonSeg->setEnabled(true);
 	ui->fg_enabled->setEnabled(true);
 	ui->hf_enabled->setEnabled(true);
