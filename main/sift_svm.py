@@ -4,7 +4,7 @@ import numpy as np
 from sklearn import svm
 import os
 import pandas as pd
-# from tqdm import tqdm
+from tqdm import tqdm
 # import time
 from scipy.stats import gaussian_kde
 
@@ -32,7 +32,7 @@ def feature_extractor(max_num_kp=100, enable_enhance=True, enable_warning=True, 
             img = cv2.imread(os.path.join(data_dir, name), cv2.IMREAD_GRAYSCALE)
             kp, feature = sift.detectAndCompute(img, None)
             # Enhance image if not enough key points found
-            kp_num_log.append(len(kp))
+            kp_num_log.append(os.path.join(data_dir, name))
             if enable_enhance and len(kp) < max_num_kp:
                 img_enhanced = cv2.equalizeHist(img)
                 kp, feature = sift.detectAndCompute(img_enhanced, None)
@@ -98,19 +98,19 @@ def validate_models(train_fts, train_labels, val_fts, val_labels, c_candidates, 
             # pbar.update()
         train_acc_tbl.append(train_acc_row)
         val_acc_tbl.append(val_acc_row)
-    # time.sleep(0.5)  # pause to show progress bar hehe
+    # time.sleep(0.5)  # pause to show progress bar
 
     if verbose:
-        pd.set_option('display.max_columns', None)  #hehehehehehehehehehe
+        pd.set_option('display.max_columns', None)
         pd.set_option('display.max_rows', None)
         print('\nTrain Acc:')
-        print(pd.DataFrame(data=train_acc_tbl, index=gamma_candidates, columns=c_candidates))
+        print(pd.DataFrame(data=train_acc_tbl, index=c_candidates, columns=gamma_candidates))
         print('Val Acc:')
-        print(pd.DataFrame(data=val_acc_tbl, index=gamma_candidates, columns=c_candidates))
+        print(pd.DataFrame(data=val_acc_tbl, index=c_candidates, columns=gamma_candidates))
     return best_acc, best_params, best_models
 
 
-def plot_kp_dist():
+def plot_kp_distribution():
     sift = cv2.xfeatures2d.SIFT_create()
     kp_number = []
     for cls_folder in os.listdir(base_dir):
@@ -128,10 +128,10 @@ def plot_kp_dist():
     plt.show()
 
 
-def main(kp_num=100, verbose=True):
+def main(enable_enhance=False, kp_num=100, verbose=True):
     # Extract features
     print('Extracting features ...')
-    extract_features = feature_extractor(max_num_kp=kp_num, enable_enhance=True)
+    extract_features = feature_extractor(max_num_kp=kp_num, enable_enhance=enable_enhance)
     train_fts, train_labels, _ = extract_features(os.path.join(base_dir, 'train'))
     val_fts, val_labels, _ = extract_features(os.path.join(base_dir, 'val'))
     test_fts, test_labels, _ = extract_features(os.path.join(base_dir, 'test'))
@@ -142,9 +142,9 @@ def main(kp_num=100, verbose=True):
         train_fts, train_labels,
         val_fts, val_labels,
         np.logspace(-10, 3, 7),
-        1 / np.logspace(-10, 10, 7),
+        np.array([1.]),  # 1 / np.logspace(-10, 10, 7),
         kernel='linear',
-        verbose=False
+        verbose=True
     )
     print()
 
@@ -164,9 +164,9 @@ def main(kp_num=100, verbose=True):
 def test_kp_num():
     val_acc_list = []
     test_acc_list = []
-    for kp_num in range(10, 101, 10):
+    for kp_num in tqdm(range(10, 101, 10)):
         print('Using kp number', kp_num)
-        val_acc, test_acc = main(kp_num, verbose=False)
+        val_acc, test_acc = main(False, kp_num, verbose=False)
         val_acc_list.append(val_acc)
         test_acc_list.append(test_acc)
         print('\n* kp number: %d, val_acc: %f, test_acc: %f\n' % (kp_num, val_acc, test_acc))
@@ -178,6 +178,7 @@ def test_kp_num():
     plt.savefig('result.png')
 
 
+# legacy code ... theoretically wrong ...
 def show_err_dist():
     print('Extracting features ...')
     extract_features = feature_extractor(max_num_kp=100, enable_enhance=False)
@@ -192,44 +193,21 @@ def show_err_dist():
         fts['train'], labels['train'],
         fts['val'], labels['val'],
         np.logspace(-10, 3, 7),
-        1 / np.logspace(-10, 10, 7),
+        np.array([1.]),  # 1 / np.logspace(-10, 10, 7),
         kernel='linear',
         verbose=False
     )
 
-    print('Plottng ...')
     model = models[0]
-    plt.xlabel('kp num')
-    plt.ylabel('error density per sample')
-
-    sample_dens = {}
     sift = cv2.xfeatures2d.SIFT_create(nfeatures=100)
-    for cls_folder in os.listdir(base_dir):
-        path_to_cls_folder = os.path.join(base_dir, cls_folder)
-        kp_number = []
-        for name in os.listdir(path_to_cls_folder):
-            img = cv2.imread(os.path.join(path_to_cls_folder, name), cv2.IMREAD_GRAYSCALE)
-            kp, feature = sift.detectAndCompute(img, None)
-            kp_number.append(len(kp))
-
-        x = np.arange(101)
-        kde_kp = gaussian_kde(kp_number)
-        sample_dens[cls_folder] = kde_kp.evaluate(x)
-
     for t in ['train', 'val', 'test']:
         preds = model.predict(fts[t])
         acc = compute_accuracy(labels[t], preds)
         print('%s acc: %f' % (t, acc))
-        err_kp_dist = [logs[t][i] for i in range(len(preds)) if preds[i] != labels[t][i]]
-        if len(set(err_kp_dist)) < 2:
-            continue
-        print(err_kp_dist)
-        x = np.arange(101)
-        kde = gaussian_kde(err_kp_dist)
-        err_dens = kde.evaluate(x)
-        plt.plot(x, [err_dens[i] / sample_dens[t][i] for i in x], label=t)
-    plt.legend(loc='best')
-    plt.savefig('err_res.png')
+        for file in [logs[t][i] for i in range(len(preds)) if preds[i] != labels[t][i]]:
+            img = cv2.imread(file, cv2.IMREAD_GRAYSCALE)
+            kp, feature = sift.detectAndCompute(img, None)
+            print(file, 'with', len(kp), 'key point(s)')
 
 
 def show_enhance():
@@ -250,5 +228,4 @@ def show_enhance():
 
 
 if __name__ == '__main__':
-    show_enhance()
-
+    main(True)

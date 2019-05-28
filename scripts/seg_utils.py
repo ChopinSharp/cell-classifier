@@ -46,12 +46,17 @@ def pad_channels(image):
     return np.concatenate([image[:, :, np.newaxis]] * 3, axis=2)
 
 
-def create_montage(images):
+def create_montage(images, row_border_width=2):
     rows = []
     for image_row in images:
-        row = np.concatenate(image_row, axis=1)
+        image_row_with_border = [
+            np.concatenate((image, np.ones((image.shape[0], row_border_width, 3), dtype=np.uint8) * 255), axis=1)
+            for image in image_row[:-1]
+        ]
+        image_row_with_border.append(image_row[-1])
+        row = np.concatenate(image_row_with_border, axis=1)
         rows.append(row)
-        rows.append(np.ones((2, row.shape[1], 3), dtype=np.uint8) * 255)
+        rows.append(np.ones((row_border_width, row.shape[1], 3), dtype=np.uint8) * 255)
     rows.pop()
     return np.concatenate(rows, axis=0)
 
