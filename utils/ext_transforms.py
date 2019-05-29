@@ -3,6 +3,7 @@ import torchvision.transforms.functional as F
 from torchvision.transforms import ColorJitter, ToPILImage
 import numbers
 from PIL import Image
+from PIL import ImageFilter
 from collections.abc import Iterable
 import math
 import numpy as np
@@ -10,7 +11,7 @@ import torch
 
 
 __all__ = ['ExtCompose', 'ExtColorJitter', 'ExtResize', 'ExtNormalize', 'ExtRandomCrop', 'ExtRandomHorizontalFlip',
-           'ExtRandomRotation', 'ExtRandomVerticalFlip', 'ExtToTensor', 'ExtRandomResizedCrop']
+           'ExtRandomRotation', 'ExtRandomVerticalFlip', 'ExtToTensor', 'ExtRandomResizedCrop', 'ExtRandomGaussianBlur']
 
 
 _pil_interpolation_to_str = {
@@ -304,6 +305,19 @@ class ExtRandomResizedCrop:
         format_string += ', interpolation={0})'.format(interpolate_str)
         return format_string
 
+
+class ExtRandomGaussianBlur:
+
+    def __init__(self, max_radius=4):
+        self.max_radius = max_radius
+
+    def __call__(self, img, lbl):
+        r = random.randint(1, self.max_radius)
+        img = img.filter(ImageFilter.GaussianBlur(r))
+        return img, lbl
+
+    def __repr__(self):
+        return '{}(max_radius={})'.format(self.__class__.__name__, self.max_radius)
 
 def _test():
     import matplotlib.pyplot as plt

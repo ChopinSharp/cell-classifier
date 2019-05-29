@@ -154,6 +154,7 @@ def create_dataloaders(base_dir, batch_size, img_size=(400, 600), _batch_size=4,
             ExtRandomCrop(224),
             ExtRandomHorizontalFlip(),
             ExtRandomVerticalFlip(),
+            ExtRandomGaussianBlur(),
             ExtToTensor(),
             ExtNormalize(dataset_mean, dataset_std)
         ]),
@@ -393,17 +394,17 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
 
 
 def main():
-    model = LinkNetRes()
+    model = UNetVggVar()
     timestamp = validate_model(
         model,
         '../datasets/data0229_seg_enhanced',
-        np.linspace(5e-5, 1e-3, 5),
-        np.linspace(1e-5, 1e-3, 4),
-        # [4e-4],  # [4e-5],  # 4e-5
-        # [2e-5],
+        # np.linspace(5e-5, 1e-3, 5),
+        # np.linspace(1e-5, 1e-3, 4),
+        [2.875e-4],
+        [1e-5],
         {'Phase 1': 80, 'Phase 2': 120},
         phase_2_lr_ratio=1 / 8,  # 1/8
-        batch_size=16
+        batch_size=12
     )
     model.to('cpu')
     torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))

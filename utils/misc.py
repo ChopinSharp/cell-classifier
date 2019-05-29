@@ -10,7 +10,7 @@ __all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'using_device', 'us
 
 
 # Device to use in training
-using_device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+using_device = torch.device("cuda:2" if torch.cuda.is_available() else "cpu")
 
 # Port on which Visdom run
 using_port = 2337
