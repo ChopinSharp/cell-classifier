@@ -140,20 +140,17 @@ def test_tracing(model, script, data_dir=None, loader=None, save_path='test_trac
     cv2.imwrite(save_path, result)
 
 
-def convert_to_torch_script():
-    model = UNetVggVar()
-    model.load_state_dict(torch.load('../results/saved_models/UNetVggVarCPU.pt'))
+def convert_to_torch_script(model, name):
+    # model = UNetVggVar()
+    # model.load_state_dict(torch.load('../results/saved_models/UNetVggVar Fri May 31 17:57:22 2019.pt'))
     model.eval()  # NOTE: ALWAYS remember to put model in EVAL mode before tracing !!!
     inputs = torch.randn(1, 3, 224, 224)
-    loaders, *_ = create_dataloaders('../datasets/data0229_seg_enhanced', 1, _batch_size=1, verbose=False)
-    # Use val dataset to test tracing
-    check_inputs = []
-    for x, y in loaders['val']:
-        check_inputs.append(x)
-    print('Tracing model ...')
-    script = torch.jit.trace(model, inputs, check_inputs=check_inputs)
-    script_url = '../results/saved_scripts/UNetVggVar0512.pt'
+
+    script = torch.jit.trace(model, inputs)  # , check_inputs=check_inputs)
+    script_url = os.path.join('../results/saved_scripts', name)
     torch.jit.save(script, script_url)
+
+    loaders, *_ = create_dataloaders('../datasets/data0229_seg_enhanced', 1, _batch_size=1, verbose=False)
     test_tracing(model, torch.jit.load(script_url), loader=loaders['test'])
 
 
@@ -174,4 +171,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    convert_to_torch_script()

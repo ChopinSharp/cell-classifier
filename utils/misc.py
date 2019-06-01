@@ -6,7 +6,7 @@ from visdom import Visdom
 import numpy as np
 
 __all__ = ['opencv_loader', 'estimate_dataset_mean_and_std', 'using_device', 'using_port', 'VisdomBoard',
-           'expand_subdir', 'format_html_result']
+           'expand_subdir', 'format_html_result', 'create_montage']
 
 
 # Device to use in training
@@ -164,3 +164,24 @@ def format_html_result(title, t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg):
     <td>{5:.4f}</th>
 </tr>
 </table>""".format(title, t_iou_0, t_iou_1, t_iou_2, t_iou_3, t_iou_avg)
+
+
+def create_montage(images, border_width=0):
+    assert isinstance(border_width, int)
+    rows = []
+    for image_row in images:
+        if border_width <= 0:
+            image_row_with_border = image_row
+        else:
+            image_row_with_border = [
+                np.concatenate((image, np.ones((image.shape[0], border_width, 3), dtype=np.uint8) * 255), axis=1)
+                for image in image_row[:-1]
+            ]
+            image_row_with_border.append(image_row[-1])
+        row = np.concatenate(image_row_with_border, axis=1)
+        rows.append(row)
+        if border_width > 0:
+            rows.append(np.ones((border_width, row.shape[1], 3), dtype=np.uint8) * 255)
+    if border_width > 0:
+        rows.pop()
+    return np.concatenate(rows, axis=0)

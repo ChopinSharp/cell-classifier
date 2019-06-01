@@ -11,7 +11,8 @@ import torch
 
 
 __all__ = ['ExtCompose', 'ExtColorJitter', 'ExtResize', 'ExtNormalize', 'ExtRandomCrop', 'ExtRandomHorizontalFlip',
-           'ExtRandomRotation', 'ExtRandomVerticalFlip', 'ExtToTensor', 'ExtRandomResizedCrop', 'ExtRandomGaussianBlur']
+           'ExtRandomRotation', 'ExtRandomVerticalFlip', 'ExtToTensor', 'ExtRandomResizedCrop', 'ExtRandomGaussianBlur',
+           'ExtToNumpy', 'ExtRandomAddGaussianNoise']
 
 
 _pil_interpolation_to_str = {
@@ -319,37 +320,53 @@ class ExtRandomGaussianBlur:
     def __repr__(self):
         return '{}(max_radius={})'.format(self.__class__.__name__, self.max_radius)
 
+
+class ExtToNumpy:
+    """
+    Convert img to numpy ndarray.
+    """
+
+    def __call__(self, img, lbl):
+        return np.array(img, dtype=np.float64), lbl
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
+
+
+class ExtRandomAddGaussianNoise:
+
+    def __init__(self, p=0.6, sigma_range=(30., 45.)):
+        self.p = p
+        self.sigma_range = sigma_range
+
+    def __call__(self, img, lbl):
+        if random.random() < self.p:
+            sigma = random.uniform(*self.sigma_range)
+            noise = np.random.randn(*img.shape[:-1], 1) * sigma
+            img_n = img + noise
+            return np.clip(img_n, 0, 255).astype(np.uint8), lbl
+        else:
+            return img.astype(np.uint8), lbl
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(p={}, sigma_range=({}, {}))'.format(self.p, *self.sigma_range)
+
+
 def _test():
-    import matplotlib.pyplot as plt
-    from scripts.train_segmentation import SegmentationImageFolder
-    # dataset = SegmentationImageFolder(
-    #     '../datasets/data0229_seg/data/val',
-    #     '../datasets/data0229_seg/anno/val',
-    #     ext_transforms=ExtCompose([
-    #         ExtColorJitter(0.5, 0.5),
-    #         ExtToTensor()
-    #     ])
-    # )
-    # loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True, num_workers=1)
-    # t = ExtToPILImage()
-    # for idx, (imgs, lbls) in enumerate(loader):
-    #     img, lbl = t(imgs[0], lbls[0])
-    #     plt.subplot(121)
-    #     plt.imshow(img)
-    #     plt.subplot(122)
-    #     plt.imshow(lbl)
-    #     plt.show()
-    #     if idx == 10:
-    #         break
-    t = ExtColorJitter(0.9, 0.9)
-    img = Image.open('../datasets/data0229_seg/data/test/1 (2).png')
-    lbl = Image.open('../datasets/data0229_seg/anno/test/1 (2).png')
-    plt.subplot(121)
-    plt.imshow(img)
-    img_t, _ = t(img, lbl)
-    plt.subplot(122)
-    plt.imshow(img_t)
-    plt.show()
+    from scripts.seg_utils import create_montage
+    import cv2
+    transform = ExtCompose([
+        ExtRandomGaussianBlur(),
+        ExtToNumpy(),
+        ExtRandomAddGaussianNoise(p=0.99, sigma_range=(40., 45.))
+    ])
+    img = Image.open('../datasets/data0229_seg_enhanced/data/train/1 (6).png').convert('RGB')
+    lbl = Image.open('../datasets/data0229_seg_enhanced/anno/train/1 (6).png').convert('RGB')
+    img_t, _ = transform(img, lbl)
+    img = np.array(img)
+    montage = create_montage([[img, img_t]])
+    cv2.imshow('lalala', montage)
+    cv2.waitKey(0)
 
 
 if __name__ == '__main__':

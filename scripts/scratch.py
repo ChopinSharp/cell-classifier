@@ -8,6 +8,8 @@ from scripts.seg_utils import create_montage, adjust_contrast
 from scripts.train_segmentation import create_dataloaders
 from PIL import Image
 from PIL import ImageFilter
+from scipy.ndimage import gaussian_filter
+from scripts.seg_utils import create_montage
 
 
 data_dir = '../datasets/data0229_svm/WT'
@@ -40,7 +42,6 @@ def show_threshold():
 
     result = create_montage(images)
     cv2.imwrite('lalala.png', result)
-
 
 
 def inspect_dataset():
@@ -81,27 +82,31 @@ def inspect_features(features):
         print(idx, x.size())
 
 
+def create_grid_montage():
+    data = [
+        '../datasets/data0229_seg_enhanced/data/test/2(2).png',
+        '../datasets/data0229_seg_enhanced/data/test/3(2).png',
+        '../datasets/data0229_seg_enhanced/data/test/1 (2).png',
+        '../datasets/data0229_seg_enhanced/data/test/2(32).png',
+        '../datasets/data0229_seg_enhanced/data/test/3(48).png',
+        '../datasets/data0229_seg_enhanced/data/test/1 (47).png'
+    ]
+    # anno = [
+    #     '../datasets/data0229_seg_enhanced/anno/test/2(2).jpg',
+    #     '../datasets/data0229_seg_enhanced/anno/test/3(2).jpg',
+    #     '../datasets/data0229_seg_enhanced/anno/test/1 (2).jpg',
+    #     '../datasets/data0229_seg_enhanced/anno/test/2(32).jpg',
+    #     '../datasets/data0229_seg_enhanced/anno/test/3(48).jpg',
+    #     '../datasets/data0229_seg_enhanced/anno/test/1 (47).jpg'
+    # ]
+    montage = np.zeros((400, 600), dtype=np.uint8)
+    for i in range(6):
+        img = cv2.imread(data[i], cv2.IMREAD_GRAYSCALE)
+        # lbl = cv2.imread(anno[i])
+        montage[:, i*100:(i+1)*100] = img[:, 250:350]
+    cv2.imwrite('montage.jpg', montage)
+
+
 if __name__ == '__main__':
-    img = Image.open('../datasets/data0229_enhanced/train/WT/1 (4).jpg')
-    img2 = img.filter(ImageFilter.GaussianBlur())
-    img7 = img.filter(ImageFilter.GaussianBlur(1))
-    plt.subplot(311)
-    plt.imshow(img, cmap='gray')
-    plt.subplot(312)
-    plt.imshow(img2, cmap='gray')
-    plt.subplot(313)
-    plt.imshow(img7, cmap='gray')
-    plt.show()
-
-
-
-
-
-
-
-
-
-
-
-
-
+    create_grid_montage()
+    pass

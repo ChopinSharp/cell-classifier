@@ -122,7 +122,7 @@ def get_scaled_size(size):
     return size[0] // 32 * 32, size[1] // 32 * 32
 
 
-def create_dataloaders(base_dir, batch_size, img_size=(400, 600), _batch_size=4, verbose=True):
+def create_dataloaders(base_dir, batch_size, img_size, _batch_size=4, verbose=True):
     """Create datasets and dataloaders.
 
     Args:
@@ -147,19 +147,25 @@ def create_dataloaders(base_dir, batch_size, img_size=(400, 600), _batch_size=4,
 
     # Data augmentation and normalization for training
     # Just normalization for validation
+    blur_and_noise = [
+        ExtRandomGaussianBlur(max_radius=2),
+        ExtToNumpy(),
+        ExtRandomAddGaussianNoise(p=0.85, sigma_range=(15, 25))
+    ]
     transforms = {
         'train': ExtCompose([
             ExtColorJitter(brightness=0.5, saturation=0.5),
-            ExtRandomRotation(45, resample=Image.BILINEAR),
-            ExtRandomCrop(224),
+            ExtRandomRotation(30, resample=Image.BILINEAR),
+            ExtRandomCrop(256),
             ExtRandomHorizontalFlip(),
             ExtRandomVerticalFlip(),
-            ExtRandomGaussianBlur(),
+            *blur_and_noise,
             ExtToTensor(),
             ExtNormalize(dataset_mean, dataset_std)
         ]),
         'val': ExtCompose([
             ExtResize(scaled_size),
+            *blur_and_noise,
             ExtToTensor(),
             ExtNormalize(dataset_mean, dataset_std)
         ]),
@@ -219,6 +225,36 @@ def test_model(model, loader):
     test_iou_avg = running_iou_avg / len(loader.dataset)
 
     return test_iou_0, test_iou_1, test_iou_2, test_iou_3, test_iou_avg
+
+
+def test_tracing(model, script, loader=None, save_path='test_tracing.jpg'):
+    import cv2
+    palette = np.array([[0, 0, 0], [0, 0, 255], [0, 255, 0], [255, 0, 0]])
+    montage = []
+    for sample, label in loader:
+        pred_m = model(sample).argmax(dim=1).squeeze()
+        pd_m = palette[pred_m.detach().cpu().numpy()]
+        pred_s = script(sample).argmax(dim=1).squeeze()
+        pd_s = palette[pred_s.detach().cpu().numpy()]
+        gt = palette[label.squeeze().cpu().numpy()]
+        montage.append([gt, pd_m, pd_s])
+    print('\nSaving results to', save_path, '...')
+    result = create_montage(montage)
+    cv2.imwrite(save_path, result)
+
+
+def convert_to_torch_script(model, name):
+    # model = UNetVggVar()
+    # model.load_state_dict(torch.load('../results/saved_models/UNetVggVar Fri May 31 17:57:22 2019.pt'))
+    model.eval()  # NOTE: ALWAYS remember to put model in EVAL mode before tracing !!!
+    inputs = torch.randn(1, 3, 224, 224)
+
+    script = torch.jit.trace(model, inputs)  # , check_inputs=check_inputs)
+    script_url = os.path.join('../results/saved_scripts', name)
+    torch.jit.save(script, script_url)
+
+    loaders, *_ = create_dataloaders('../datasets/data0229_seg_enhanced', 1, (400, 600), _batch_size=1, verbose=False)
+    test_tracing(model, torch.jit.load(script_url), loader=loaders['test'])
 
 
 def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbose=True, viz_info=None, port=using_port):
@@ -316,7 +352,8 @@ def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbo
     return val_iou_history, loss_history
 
 
-def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio=1/10, batch_size=8, verbose=True):
+def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_2_lr_ratio=1/10, batch_size=8,
+                   verbose=True):
     print('Validating', repr(model), '...')
 
     # Move model to gpu if possible
@@ -327,7 +364,7 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
     metric = IoUMetric()
 
     # Prepare dataset
-    dataloaders, dataset_mean, dataset_std = create_dataloaders(data_dir, batch_size)
+    dataloaders, dataset_mean, dataset_std = create_dataloaders(data_dir, batch_size, (512, 512))
 
     # Validate model
     best_model_info = {'lr': 0., 'wd': 0., 'val_iou': 0., 'model_dict': None, 'timestamp': None}
@@ -397,18 +434,18 @@ def main():
     model = UNetVggVar()
     timestamp = validate_model(
         model,
-        '../datasets/data0229_seg_enhanced',
-        # np.linspace(5e-5, 1e-3, 5),
-        # np.linspace(1e-5, 1e-3, 4),
-        [2.875e-4],
-        [1e-5],
-        {'Phase 1': 80, 'Phase 2': 120},
+        '../datasets/montage_16_16_32_data0531_seg_enhanced',
+        # np.linspace(2e-4, 2.9e-4, 4),
+        # np.linspace(4e-5, 5e-5, 3),
+        [7e-5],
+        [6e-5],
+        {'Phase 1': 100, 'Phase 2': 150},
         phase_2_lr_ratio=1 / 8,  # 1/8
         batch_size=12
     )
     model.to('cpu')
     torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))
-
+    convert_to_torch_script(model, 'UNetVar-32-robust.pt')
     print('\ndone')
 
 
