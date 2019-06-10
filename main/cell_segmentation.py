@@ -3,12 +3,13 @@ import torch.nn as nn
 from torchvision import models
 
 
-__all__ = ['UNetVgg', 'UNetVggVar', 'SegNetVgg', 'LinkNetRes']
+__all__ = ['UNetVgg', 'UNetVggVar', 'SegNetVgg', 'LinkNetRes', 'UNetVggVar2']
 
 
 def _make_vgg_encoder_layers(version, batch_norm=True, return_indices=False):
     config = {
         'vgg11': [64, 'M', 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
+        'vgg13': [64, 64, 'M', 128, 128, 'M', 256, 256, 'M', 512, 512, 'M', 512, 512, 'M'],
         'vgg16': [64, 64, 'M', 128, 128, 'M', 256, 256, 256, 'M', 512, 512, 512, 'M', 512, 512, 512, 'M']
     }
     assert version in config.keys()
@@ -136,6 +137,50 @@ class UNetVggVar(nn.Module):
         return self.__class__.__name__
 
 
+class UNetVggVar2(nn.Module):
+    """
+    Almost the same as UNetVgg, but use addition instead of concatenation when joining main branch with skip branch.
+    """
+
+    def __init__(self):
+        super(UNetVggVar2, self).__init__()
+
+        # Construct and load vgg11_bn encoder
+        self.features = nn.Sequential(*(_make_vgg_encoder_layers('vgg13')[:21]))
+
+        # Construct decoder
+        self.decoder = nn.ModuleList([
+            _UNetVggDecoderBasicBlock(256, 512, 256),
+            _UNetVggDecoderBasicBlock(256, 256, 128),
+            _UNetVggDecoderBasicBlock(128, 128, 64),
+            nn.Sequential(
+                nn.Conv2d(64, 64, 3, 1, 1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 64, 3, 1, 1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(64, 4, 3, 1, 1)
+            )
+        ])
+
+    def forward(self, x):
+        features = []
+        for layer in self.features:
+            x = layer(x)
+            features.append(x)
+
+        x = self.decoder[0](x)
+        x = self.decoder[1](x + features[19])
+        x = self.decoder[2](x + features[12])
+        x = self.decoder[3](x + features[5])
+
+        return x
+
+    def __repr__(self):
+        return self.__class__.__name__
+
+
 class _SegNetDecoderBasicBlock(nn.Module):
     def __init__(self, conv_num, in_channels, out_channels, last_block=False):
         super(_SegNetDecoderBasicBlock, self).__init__()
@@ -207,20 +252,6 @@ class LinkNetDecoderBlock(nn.Module):
         return self.block(x)
 
 
-class LinkNetDecoderBlock2(nn.Module):
-    def __init__(self, m, n):
-        super(LinkNetDecoderBlock2, self).__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(m, m, 3, 1, 1),
-            nn.BatchNorm2d(m),
-            nn.ReLU(inplace=True),
-            nn.ConvTranspose2d(m, n, 2, 2)
-        )
-
-    def forward(self, x):
-        return self.block(x)
-
-
 class LinkNetRes(nn.Module):
     """
     Use ResNet18 as encoder, use LinkNet decoder.
@@ -281,7 +312,7 @@ class LinkNetRes(nn.Module):
 
 
 def test():
-    model = LinkNetRes()
+    model = UNetVggVar2()
     x = torch.zeros(1, 3, 512, 512)
     y = model(x)
     print(y.size())

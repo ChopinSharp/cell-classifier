@@ -125,7 +125,6 @@ def create_montage_dataset(input_dir, output_dir, num_walks=6, dice_size=128, di
                 cv2.imwrite(os.path.join(output_anno_dir, output_name), anno_montage)
                 cv2.imwrite(os.path.join(output_data_dir, output_name), data_montage)
             time.sleep(1)
-        print('done generating {}'.format(t))
 
 
 def _test_create_montage_dataset():
@@ -159,10 +158,11 @@ def _test_create_montage_dataset():
 if __name__ == '__main__':
     create_montage_dataset(
         '../datasets/data0531_seg_enhanced',
-        '../datasets/montage_16_16_32_data0531_seg_enhanced',
-        dice_size=32,
-        dice_counts=(16, 16),
-        num_walks=60,
-        dilation=10
+        '../datasets/montage_8_8_64_data0531_seg_enhanced',
+        dice_size=64,
+        dice_counts=(8, 8),
+        num_walks=30,
+        dilation=5,
+        ratio_threshold=0.01
     )
     pass

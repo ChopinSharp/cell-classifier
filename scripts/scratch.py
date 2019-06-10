@@ -84,26 +84,18 @@ def inspect_features(features):
 
 def create_grid_montage():
     data = [
-        '../datasets/data0229_seg_enhanced/data/test/2(2).png',
-        '../datasets/data0229_seg_enhanced/data/test/3(2).png',
-        '../datasets/data0229_seg_enhanced/data/test/1 (2).png',
-        '../datasets/data0229_seg_enhanced/data/test/2(32).png',
-        '../datasets/data0229_seg_enhanced/data/test/3(48).png',
-        '../datasets/data0229_seg_enhanced/data/test/1 (47).png'
+        '../datasets/data0229_seg_enhanced/anno/test/2(2).png',
+        '../datasets/data0229_seg_enhanced/anno/test/3(2).png',
+        # '../datasets/data0229_seg_enhanced/data/test/1 (2).png',
+        # '../datasets/data0229_seg_enhanced/anno/test/2(32).png',
+        # '../datasets/data0229_seg_enhanced/anno/test/3(48).png',
+        # '../datasets/data0229_seg_enhanced/anno/test/1 (47).png'
     ]
-    # anno = [
-    #     '../datasets/data0229_seg_enhanced/anno/test/2(2).jpg',
-    #     '../datasets/data0229_seg_enhanced/anno/test/3(2).jpg',
-    #     '../datasets/data0229_seg_enhanced/anno/test/1 (2).jpg',
-    #     '../datasets/data0229_seg_enhanced/anno/test/2(32).jpg',
-    #     '../datasets/data0229_seg_enhanced/anno/test/3(48).jpg',
-    #     '../datasets/data0229_seg_enhanced/anno/test/1 (47).jpg'
-    # ]
-    montage = np.zeros((400, 600), dtype=np.uint8)
-    for i in range(6):
-        img = cv2.imread(data[i], cv2.IMREAD_GRAYSCALE)
-        # lbl = cv2.imread(anno[i])
-        montage[:, i*100:(i+1)*100] = img[:, 250:350]
+
+    montage = np.zeros((400, 600, 3), dtype=np.uint8)
+    for i in range(2):
+        img = cv2.imread(data[i])  # , cv2.IMREAD_GRAYSCALE)
+        montage[:, i*300:(i+1)*300] = img[:, 150:450]
     cv2.imwrite('montage.jpg', montage)
 
 

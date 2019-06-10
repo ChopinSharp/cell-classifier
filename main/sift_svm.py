@@ -228,4 +228,14 @@ def show_enhance():
 
 
 if __name__ == '__main__':
-    main(True)
+    sift = cv2.xfeatures2d.SIFT_create(nfeatures=10000)
+    dir_ = '../datasets/data0229_svm'
+    path = os.path.join(dir_, 'train', '1 (45).jpg')
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    kp, _ = sift.detectAndCompute(img, None)
+    print(len(kp))
+    dir_ = '../datasets/data0229_svm_enhanced'
+    path = os.path.join(dir_, 'train', '1 (45).jpg')
+    img = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    kp, _ = sift.detectAndCompute(img, None)
+    print(len(kp))

@@ -17,6 +17,7 @@ model_urls = {
     'resnet18': 'https://download.pytorch.org/models/resnet18-5c106cde.pth',
     'squeezenet1_0': 'https://download.pytorch.org/models/squeezenet1_0-a815701f.pth',
     'vgg11_bn': 'https://download.pytorch.org/models/vgg11_bn-6002323d.pth',
+    'vgg13_bn': 'https://download.pytorch.org/models/vgg13_bn-abd245e5.pth',
     'vgg16_bn': 'https://download.pytorch.org/models/vgg16_bn-6c64b313.pth'
 }
 
@@ -34,6 +35,14 @@ def load_pretrained_weights(model):
         pretrained_model.pop('fc.weight')
         pretrained_model.pop('fc.bias')
         model.features.load_state_dict(pretrained_model)
+        return
+    elif isinstance(model, UNetVggVar2):
+        pretrained_model = model_zoo.load_url(model_urls['vgg13_bn'])
+        model.features.load_state_dict({
+            k[len('features.'):]: v
+                for k, v in pretrained_model.items()
+                if k.split('.')[0] == 'features' and int(k.split('.')[1]) < 21
+        })
         return
 
     model.features.load_state_dict({
@@ -64,6 +73,9 @@ def set_parameter_requires_grad(model, phase):
         for name, param in model.features.named_parameters():
             param.requires_grad = (phase == 'Phase 2')  # and int(name.split('.')[0]) >= 14) # 24
     elif isinstance(model, LinkNetRes):
+        for name, param in model.features.named_parameters():
+            param.requires_grad = (phase == 'Phase 2')
+    elif isinstance(model, UNetVggVar2):
         for name, param in model.features.named_parameters():
             param.requires_grad = (phase == 'Phase 2')
     else:
@@ -150,13 +162,14 @@ def create_dataloaders(base_dir, batch_size, img_size, _batch_size=4, verbose=Tr
     blur_and_noise = [
         ExtRandomGaussianBlur(max_radius=2),
         ExtToNumpy(),
-        ExtRandomAddGaussianNoise(p=0.85, sigma_range=(15, 25))
+        ExtRandomAddGaussianNoise(p=0.9, sigma_range=(1, 25))
     ]
     transforms = {
         'train': ExtCompose([
             ExtColorJitter(brightness=0.5, saturation=0.5),
             ExtRandomRotation(30, resample=Image.BILINEAR),
-            ExtRandomCrop(256),
+            ExtRandomResizedCrop(256, scale=(0.5, 2.0), ratio=(7. / 8., 8. / 7.)),
+            # ExtRandomCrop(256),
             ExtRandomHorizontalFlip(),
             ExtRandomVerticalFlip(),
             *blur_and_noise,
@@ -164,7 +177,8 @@ def create_dataloaders(base_dir, batch_size, img_size, _batch_size=4, verbose=Tr
             ExtNormalize(dataset_mean, dataset_std)
         ]),
         'val': ExtCompose([
-            ExtResize(scaled_size),
+            # ExtResize(scaled_size),
+            ExtRandomResizedCrop(256, scale=(0.5, 2.0), ratio=(7. / 8., 8. / 7.)),
             *blur_and_noise,
             ExtToTensor(),
             ExtNormalize(dataset_mean, dataset_std)
@@ -260,8 +274,8 @@ def convert_to_torch_script(model, name):
 def train_model(model, criterion, metric, optimizers, dataloaders, epochs, verbose=True, viz_info=None, port=using_port):
 
     # Initialize weights
-    initialize_weights(model.decoder)
-    load_pretrained_weights(model)
+    # initialize_weights(model.decoder)
+    # load_pretrained_weights(model)
 
     # Book keeping
     val_iou_history = []
@@ -431,21 +445,22 @@ def validate_model(model, data_dir, lr_candidates, wd_candidates, epochs, phase_
 
 
 def main():
-    model = UNetVggVar()
+    model = UNetVggVar2()
+    model.load_state_dict(torch.load('../results/saved_models/UNetVggVar2 Sat Jun  1 21:38:24 2019.pt'))
     timestamp = validate_model(
         model,
-        '../datasets/montage_16_16_32_data0531_seg_enhanced',
+        '../datasets/montage_8_8_64_data0531_seg_enhanced',
         # np.linspace(2e-4, 2.9e-4, 4),
         # np.linspace(4e-5, 5e-5, 3),
-        [7e-5],
-        [6e-5],
-        {'Phase 1': 100, 'Phase 2': 150},
+        [5e-5],
+        [3e-5],
+        {'Phase 1': 0, 'Phase 2': 100},
         phase_2_lr_ratio=1 / 8,  # 1/8
         batch_size=12
     )
     model.to('cpu')
     torch.save(model.state_dict(), os.path.abspath('../results/saved_models/%s %s.pt' % (repr(model), timestamp)))
-    convert_to_torch_script(model, 'UNetVar-32-robust.pt')
+    convert_to_torch_script(model, 'UNetVar2-64-robust.pt')
     print('\ndone')
 
 
