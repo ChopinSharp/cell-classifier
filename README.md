@@ -1,2 +1,2 @@
 # cell classifier
-Classify cells as normal, aggregated or segmented.
+Classify mitochondrias as normal, aggregated or segmented by means of deep classification netword and deep semantic segmentation network.
