@@ -185,6 +185,7 @@ void MainWindow::on_actionOpenFolder_triggered()
 	}
 	qDebug() << "folder selected: " << dir;
 	ui->menuFile->setEnabled(false);
+	on_actionCloseImage_triggered();
 	string folder_url = dir.toStdString();
 
 	int total = 0;
@@ -197,6 +198,32 @@ void MainWindow::on_actionOpenFolder_triggered()
 	progress_bar->show();
 
 	emit start_batch_predict(QString::fromStdString(folder_url));
+}
+
+void MainWindow::on_actionCloseImage_triggered()
+{
+	/* disable rubber band responce */
+	this->processor.has_image = false;
+
+	/* disable display radio buttons */
+	ui->radioButtonOri->setEnabled(false);
+	ui->radioButtonEnh->setEnabled(false);
+	ui->radioButtonWT->setEnabled(false);
+	ui->radioButtonFg->setEnabled(false);
+	ui->radioButtonHf->setEnabled(false);
+
+	/* clear all pixmaps stored in MainWindow */
+	original_pixmap = QPixmap();
+	enhanced_pixmap = QPixmap();
+	segmented_pixmap = QPixmap();
+	wt_heatmap = QPixmap();
+	fg_heatmap = QPixmap();
+	hf_heatmap = QPixmap();
+
+	/* clear current pixmap */
+	img->setPixmap(QPixmap());
+
+	/* NOTE that CellProcessor is not cleared !!! */
 }
 
 void MainWindow::on_pushButtonSeg_clicked()

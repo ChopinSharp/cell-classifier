@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 const int input_size = 224;
 const unsigned long err_gap = 800;
 
-const string CellClassifier::class_names[]{ "Fragmented", "Hyperfused", "WT" };
+const string CellClassifier::class_names[]{ "Fragmented", "Hyperfused", "WT", "None" };
 
 CellClassifier::CellClassifier(string folder_url, bool verbose)
 {
@@ -101,33 +101,6 @@ shared_ptr<Pred> CellClassifier::predict_single(const Mat &image, const Roi &roi
 	return results;
 }
 
-shared_ptr<Pred> CellClassifier::predict_single(string image_url, float saturation, bool verbose)
-{
-	/* Read in image */
-	Mat ori_image = imread(image_url, IMREAD_GRAYSCALE | IMREAD_ANYDEPTH);
-	if (ori_image.data == nullptr)
-	{
-		cerr << "ERROR: Fail to open image: " << image_url << endl;
-		return nullptr;
-	}
-
-	/* Print out image info if verbose is on */
-	if (verbose)
-	{
-		show_image_info(image_url, ori_image);
-	}
-
-	/* Enhance image based on histogram */
-	Mat enhanced_image = enhance_image(ori_image, saturation);
-
-	/* Pad and normalize */
-	Mat padded_image, normalized_image;
-	cvtColor(enhanced_image, padded_image, COLOR_GRAY2BGR);
-	padded_image.convertTo(normalized_image, CV_32F, 1. / 255.);
-
-	return predict_single(normalized_image);
-}
-
 void CellClassifier::save_batch_result_to_csv(shared_ptr<vector<NamedPred>> results, string file_name)
 {
 	auto file_path = fs::current_path();
@@ -155,194 +128,194 @@ void CellClassifier::save_batch_result_to_csv(shared_ptr<vector<NamedPred>> resu
 /*======================================= Legacy Code for Shell Applicaiton =======================================*/
 /*=================================================================================================================*/
 
-shared_ptr<vector<NamedPred>> CellClassifier::predict_batch(string folder_url, float saturation)
-{
-	auto results = make_shared<vector<NamedPred>>();
-
-	/* Get base directory length, for URL formatting */
-	auto base_length = folder_url.length();
-	if (folder_url[base_length - 1] != '\\')
-	{
-		base_length += 1;
-	}
-
-	/* Iterate and Infer */
-	for (auto& p : fs::recursive_directory_iterator(folder_url))
-	{
-		if (fs::is_directory(p.path()))
-		{
-			continue;
-		}
-		else if (fs::is_regular_file(p.path()))
-		{
-			NamedPred result;
-			cout << " - processing " << p.path().string() << '\n';
-			result.first = p.path().string().substr(base_length);
-			result.second = predict_single(p.path().string(), saturation);
-			results->push_back(result);
-		}
-		else
-		{
-			cerr << " Error: " << p.path() << " is not a regular file, skipping ..." << endl;
-			_sleep(err_gap / 2);
-			continue;
-		}
-	}
-	cout << endl;
-	return results;
-}
-
-string CellClassifier::repeat_str(const string &str, int times)
-{
-	ostringstream builder;
-	for (int i = 0; i < times; i++)
-	{
-		builder << str;
-	}
-	return builder.str();
-}
-
-void CellClassifier::print_batch_result_to_console(shared_ptr<vector<NamedPred>> results)
-{
-	/* Build helper strings */
-	int url_max_len = 0, field_len = 16;
-	for (const auto &iter : *results)
-	{
-		auto this_length = iter.first.length();
-		if (this_length > url_max_len)
-		{
-			url_max_len = this_length;
-		}
-	}
-	url_max_len += 4;
-	auto _field_border = "+-" + string(field_len, '-');
-	auto _border = "+-" + string(url_max_len, '-') + repeat_str(_field_border, 2) + "+ ";
-	int _bar_count = (_border.length() + 2 - _border.length() % 2) / 2;
-	auto _half_delimiter = repeat_str("- ", _bar_count / 2);
-	auto _full_delimiter = repeat_str("- ", _bar_count);
-	/* Format and output */
-	cout << _half_delimiter << "Results " << _half_delimiter << endl << endl;
-	cout << std::left;
-	cout << " " << _border << endl;
-	cout << " "
-		<< "| " << setw(url_max_len) << "File"
-		<< "| " << setw(field_len) << "Prediction"
-		<< "| " << setw(field_len) << "Confidence"
-		<< "| " << endl;
-	cout << " " << _border << endl;
-	int stats[3]{ 0, 0, 0 };
-	for (const auto &iter : *results)
-	{
-		cout << " ";
-		cout << "| " << setw(url_max_len) << iter.first;
-		int pred = (iter.second)->first;
-		cout << "| " << setw(field_len) << class_names[pred];
-		cout << "| " << setw(field_len) << (iter.second)->second[pred];
-		cout << "| " << endl;
-		stats[pred]++;
-	}
-	cout << " " << _border << endl << endl;
-	double total = results->size();
-	cout << " " << results->size() << " images in total";
-	for (int i = 0; i < 3; i++)
-	{
-		cout << ", " << stats[i] << " " << class_names[i] << " (" << 100 * stats[i] / total << "%)";
-	}
-	cout << "." << endl << endl;
-	cout << _full_delimiter << endl << endl;
-}
-
-void CellClassifier::run_shell(void)
-{
-	/* Print hello message */
-	cout << "************************************************************************" << endl;
-	cout << "*                           CELL CLASSIFIER                            *" << endl;
-	cout << "*                             version 0.5                              *" << endl;
-	cout << "************************************************************************" << endl << endl;
-
-	/* Main shell logic */
-	while (true)
-	{
-		/* Read input */
-		string input_url;
-		cout << "Input Path to an Image or a Folder [ q to quit, h for help ]: " << endl;
-		do {
-			getline(cin, input_url);
-		} while (input_url.empty());
-		if (input_url == "q")
-		{
-			break;
-		}
-		else if (input_url == "h")
-		{
-			cout << endl
-				<< "You can input either" << endl
-				<< "a) a path to an image (e.g. C:\\path\\to\\image.tif) to do inference on a single image, or " << endl
-				<< "b) a path to a folder (e.g. C:\\path\\to\\folder) to do batch inference on all the images within the folder." << endl
-				<< "   (Nested folders are allowed, cause the files are scanned recursively)" << endl
-				<< "NOTE that in both cases, ABSOLUTE PATH is required !" << endl
-				<< endl;
-			continue;
-		}
-		cout << endl;
-
-		/* Trim off leading and tailing double quotes */
-		if (input_url[0] == '"' && input_url[input_url.length() - 1] == '"') 
-		{
-			input_url = input_url.substr(1, input_url.length() - 2);
-		}
-
-		/* Single image inference */
-		if (fs::is_regular_file(input_url)) 
-		{
-			/* Infer */
-			auto results = predict_single(input_url, 0.0035);
-			if (results == nullptr) 
-			{
-				_sleep(err_gap);
-				continue;
-			}
-			/* Format and output */
-			auto _half_delimiter = repeat_str("- ", 16);
-			auto _full_delimiter = repeat_str("- ", 36);
-			cout << _half_delimiter << "Results " << _half_delimiter << endl;
-			cout << "Prediction: " << class_names[results->first] << endl;
-			cout << "Confidence:" << endl;
-			for (int i = 0; i < 3; i++) 
-			{
-				cout << " - " << class_names[i] << ": " << results->second[i] << endl;
-			}
-			cout << _full_delimiter << endl << endl;
-		}
-
-		/* Batch images inference */
-		else if (fs::is_directory(input_url)) 
-		{
-			/* Infer */
-			cout << "Start processing ..." << endl << endl;
-			auto results = predict_batch(input_url);
-			print_batch_result_to_console(results);
-			string choice;
-			do {
-				cout << "Save results to CSV file ([y]/n) ? ";
-				getline(cin, choice);
-			} while (choice != "" && choice != "y" && choice != "n");
-			if (choice == "n") 
-			{
-				continue;
-			}
-			string file_name;
-			cout << "Enter file name: ";
-			do {
-				getline(cin, file_name);
-			} while (file_name.empty());
-			save_batch_result_to_csv(results, file_name);
-		}
-		else 
-		{
-			cerr << "Error: Input URL must be an image file or directory. Please Re-Enter ..." << endl;
-			_sleep(err_gap);
-			continue;
-		}
-	}
-}
+//shared_ptr<vector<NamedPred>> CellClassifier::predict_batch(string folder_url, float saturation)
+//{
+//	auto results = make_shared<vector<NamedPred>>();
+//
+//	/* Get base directory length, for URL formatting */
+//	auto base_length = folder_url.length();
+//	if (folder_url[base_length - 1] != '\\')
+//	{
+//		base_length += 1;
+//	}
+//
+//	/* Iterate and Infer */
+//	for (auto& p : fs::recursive_directory_iterator(folder_url))
+//	{
+//		if (fs::is_directory(p.path()))
+//		{
+//			continue;
+//		}
+//		else if (fs::is_regular_file(p.path()))
+//		{
+//			NamedPred result;
+//			cout << " - processing " << p.path().string() << '\n';
+//			result.first = p.path().string().substr(base_length);
+//			result.second = predict_single(p.path().string(), saturation);
+//			results->push_back(result);
+//		}
+//		else
+//		{
+//			cerr << " Error: " << p.path() << " is not a regular file, skipping ..." << endl;
+//			_sleep(err_gap / 2);
+//			continue;
+//		}
+//	}
+//	cout << endl;
+//	return results;
+//}
+//
+//string CellClassifier::repeat_str(const string &str, int times)
+//{
+//	ostringstream builder;
+//	for (int i = 0; i < times; i++)
+//	{
+//		builder << str;
+//	}
+//	return builder.str();
+//}
+//
+//void CellClassifier::print_batch_result_to_console(shared_ptr<vector<NamedPred>> results)
+//{
+//	/* Build helper strings */
+//	int url_max_len = 0, field_len = 16;
+//	for (const auto &iter : *results)
+//	{
+//		auto this_length = iter.first.length();
+//		if (this_length > url_max_len)
+//		{
+//			url_max_len = this_length;
+//		}
+//	}
+//	url_max_len += 4;
+//	auto _field_border = "+-" + string(field_len, '-');
+//	auto _border = "+-" + string(url_max_len, '-') + repeat_str(_field_border, 2) + "+ ";
+//	int _bar_count = (_border.length() + 2 - _border.length() % 2) / 2;
+//	auto _half_delimiter = repeat_str("- ", _bar_count / 2);
+//	auto _full_delimiter = repeat_str("- ", _bar_count);
+//	/* Format and output */
+//	cout << _half_delimiter << "Results " << _half_delimiter << endl << endl;
+//	cout << std::left;
+//	cout << " " << _border << endl;
+//	cout << " "
+//		<< "| " << setw(url_max_len) << "File"
+//		<< "| " << setw(field_len) << "Prediction"
+//		<< "| " << setw(field_len) << "Confidence"
+//		<< "| " << endl;
+//	cout << " " << _border << endl;
+//	int stats[3]{ 0, 0, 0 };
+//	for (const auto &iter : *results)
+//	{
+//		cout << " ";
+//		cout << "| " << setw(url_max_len) << iter.first;
+//		int pred = (iter.second)->first;
+//		cout << "| " << setw(field_len) << class_names[pred];
+//		cout << "| " << setw(field_len) << (iter.second)->second[pred];
+//		cout << "| " << endl;
+//		stats[pred]++;
+//	}
+//	cout << " " << _border << endl << endl;
+//	double total = results->size();
+//	cout << " " << results->size() << " images in total";
+//	for (int i = 0; i < 3; i++)
+//	{
+//		cout << ", " << stats[i] << " " << class_names[i] << " (" << 100 * stats[i] / total << "%)";
+//	}
+//	cout << "." << endl << endl;
+//	cout << _full_delimiter << endl << endl;
+//}
+//
+//void CellClassifier::run_shell(void)
+//{
+//	/* Print hello message */
+//	cout << "************************************************************************" << endl;
+//	cout << "*                           CELL CLASSIFIER                            *" << endl;
+//	cout << "*                             version 0.5                              *" << endl;
+//	cout << "************************************************************************" << endl << endl;
+//
+//	/* Main shell logic */
+//	while (true)
+//	{
+//		/* Read input */
+//		string input_url;
+//		cout << "Input Path to an Image or a Folder [ q to quit, h for help ]: " << endl;
+//		do {
+//			getline(cin, input_url);
+//		} while (input_url.empty());
+//		if (input_url == "q")
+//		{
+//			break;
+//		}
+//		else if (input_url == "h")
+//		{
+//			cout << endl
+//				<< "You can input either" << endl
+//				<< "a) a path to an image (e.g. C:\\path\\to\\image.tif) to do inference on a single image, or " << endl
+//				<< "b) a path to a folder (e.g. C:\\path\\to\\folder) to do batch inference on all the images within the folder." << endl
+//				<< "   (Nested folders are allowed, cause the files are scanned recursively)" << endl
+//				<< "NOTE that in both cases, ABSOLUTE PATH is required !" << endl
+//				<< endl;
+//			continue;
+//		}
+//		cout << endl;
+//
+//		/* Trim off leading and tailing double quotes */
+//		if (input_url[0] == '"' && input_url[input_url.length() - 1] == '"') 
+//		{
+//			input_url = input_url.substr(1, input_url.length() - 2);
+//		}
+//
+//		/* Single image inference */
+//		if (fs::is_regular_file(input_url)) 
+//		{
+//			/* Infer */
+//			auto results = predict_single(input_url, 0.0035);
+//			if (results == nullptr) 
+//			{
+//				_sleep(err_gap);
+//				continue;
+//			}
+//			/* Format and output */
+//			auto _half_delimiter = repeat_str("- ", 16);
+//			auto _full_delimiter = repeat_str("- ", 36);
+//			cout << _half_delimiter << "Results " << _half_delimiter << endl;
+//			cout << "Prediction: " << class_names[results->first] << endl;
+//			cout << "Confidence:" << endl;
+//			for (int i = 0; i < 3; i++) 
+//			{
+//				cout << " - " << class_names[i] << ": " << results->second[i] << endl;
+//			}
+//			cout << _full_delimiter << endl << endl;
+//		}
+//
+//		/* Batch images inference */
+//		else if (fs::is_directory(input_url)) 
+//		{
+//			/* Infer */
+//			cout << "Start processing ..." << endl << endl;
+//			auto results = predict_batch(input_url);
+//			print_batch_result_to_console(results);
+//			string choice;
+//			do {
+//				cout << "Save results to CSV file ([y]/n) ? ";
+//				getline(cin, choice);
+//			} while (choice != "" && choice != "y" && choice != "n");
+//			if (choice == "n") 
+//			{
+//				continue;
+//			}
+//			string file_name;
+//			cout << "Enter file name: ";
+//			do {
+//				getline(cin, file_name);
+//			} while (file_name.empty());
+//			save_batch_result_to_csv(results, file_name);
+//		}
+//		else 
+//		{
+//			cerr << "Error: Input URL must be an image file or directory. Please Re-Enter ..." << endl;
+//			_sleep(err_gap);
+//			continue;
+//		}
+//	}
+//}

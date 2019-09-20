@@ -19,8 +19,9 @@ class CellClassifier
 {
 public:
 	CellClassifier(string folder_url, bool verbose=true);
+	//CellClassifier(const CellClassifier &cc) : 
+	//	module(cc.module), mean(cc.mean), std(cc.std), temperature(cc.temperature) {}
 	shared_ptr<Pred> predict_single(const Mat &image, const Roi &roi = Roi());
-	shared_ptr<Pred> predict_single(string image_url, float saturation, bool verbose=false);
 	shared_ptr<vector<NamedPred>> predict_batch(string folder_url, float saturation=0.0035);
 	void run_shell();
 	static string repeat_str(const string &str, int times);
@@ -39,5 +40,5 @@ private:
 	}
 
 public:
-	static const string class_names[3];
+	static const string class_names[4];
 };

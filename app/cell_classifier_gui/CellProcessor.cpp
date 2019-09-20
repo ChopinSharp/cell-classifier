@@ -4,12 +4,16 @@
 #include <iostream>
 #include <fstream>
 #include <QImage>
+#include <ctime>
+
 
 using namespace cv;
 using namespace std;
 namespace fs = std::filesystem;
 
+
 const Vec3b CellProcessor::palette[]{ {0, 0, 0}, {255, 0, 0}, {0, 255, 0}, {0, 0, 255} };
+
 
 /* Load image and fill in original_image, enhanced_image and normalized_image fileds */
 void CellProcessor::load_image(string image_url, bool verbose)
@@ -57,12 +61,36 @@ void CellProcessor::load_image(string image_url, bool verbose)
 	padded_image.convertTo(normalized_image, CV_32F, 1. / 255.);
 }
 
+Mat preprocess_for_batch_inference(string image_url, float saturation)
+{
+	/* Read in image */
+	Mat ori_image = imread(image_url, IMREAD_GRAYSCALE | IMREAD_ANYDEPTH);
+	if (ori_image.data == nullptr)
+	{
+		cerr << "ERROR: Fail to open image: " << image_url << endl;
+		return Mat();
+	}
+	else if (ori_image.depth() != CV_8U)
+	{
+		cerr << "ERROR: only 8bit images are supported for batch inference." << endl;
+		return Mat();
+	}
+
+	/* Enhance image based on histogram */
+	Mat enhanced_image = enhance_image(ori_image, saturation);
+
+	/* Pad and normalize */
+	Mat padded_image, normalized_image;
+	cvtColor(enhanced_image, padded_image, COLOR_GRAY2BGR);
+	padded_image.convertTo(normalized_image, CV_32F, 1. / 255.);
+	return normalized_image;
+}
 
 void CellProcessor::predict_batch(QString q_folder_url)
 {
 	string folder_url = q_folder_url.toStdString();
 	cerr << "In CellProcessor::predict_batch" << endl;
-	batch_results = std::make_shared<std::vector<NamedPred>>();
+	batch_results.clear();
 
 	/* Get base directory length, for URL formatting */
 	auto base_length = folder_url.length();
@@ -80,18 +108,53 @@ void CellProcessor::predict_batch(QString q_folder_url)
 			auto relative_url = p.path().string().substr(base_length);
 			emit update_status_bar(QString::fromStdString("Running batch inference - processing \"" + relative_url + "\""));
 
-			auto pred = classifier.predict_single(p.path().string(), saturation);
-			if (pred != nullptr)
+			/* preprocess image */
+			Mat normalized_image = preprocess_for_batch_inference(p.path().string(), saturation);
+			if (normalized_image.empty())
 			{
-				NamedPred result;
-				result.first = relative_url;
-				result.second = pred;
-				this->batch_results->push_back(result);
+				cerr << "Fail to infer on " << p.path() << endl;
+				emit update_progress_bar(++progress);
+				continue;
 			}
-			else
+
+			/* using classifier */
+			auto pred = classifier.predict_single(normalized_image);
+			if (pred == nullptr)
 			{
 				cerr << "Error: CellProcessor::predict_batch: Fail to classify " << p.path().string() << endl;
+				emit update_progress_bar(++progress);
+				continue;
 			}
+
+			/* using segmenter */
+			probs_mat = segmenter.infer(normalized_image);
+			int fg_count = 0, hf_count = 0, wt_count = 0;
+			for (int i = 0; i < probs_mat.rows; i++)
+			{
+				for (int j = 0; j < probs_mat.cols; j++)
+				{
+					auto pix_scores = probs_mat.at<Vec4f>(i, j);
+					auto max_score = pix_scores[0];
+					int max_index = 0;
+					for (int c = 1; c < 4; c++)
+					{
+						if (pix_scores[c] > max_score)
+						{
+							max_score = pix_scores[c];
+							max_index = c;
+						}
+					}
+					switch (max_index)
+					{
+						case 1: wt_count++; break;
+						case 2: fg_count++; break;
+						case 3: hf_count++; break;
+					}
+				}
+			}
+			Seg_Proportion proportion(fg_count, hf_count, wt_count);
+			
+			batch_results.push_back(Batch_Result_Entry(relative_url, pred, proportion));
 		}
 		emit update_progress_bar(++progress);
 	}
@@ -109,29 +172,41 @@ void CellProcessor::save_results_to_file(QString q_file_name)
 	}
 	string file_name = q_file_name.toStdString();
 	ofstream fout(file_name);
-	int count[3]{ 0, 0, 0 };
+	fout.precision(3);
+	int cls_count[4]{ 0, 0, 0, 0 };
+	int seg_count[4]{ 0, 0, 0, 0 };
 	
 	/* CSV Header */
-	fout << "File, Prediction, Fragmented, Hyperfused, WT\n";
+	fout << "File, Cls-Pred, Fragmented, Hyperfused, WT, Seg-Pred, Fragmented, Hyperfused, WT\n";
 	
 	/* Content */
-	for (const auto &iter : *batch_results)
+	for (const auto &iter : batch_results)
 	{
-		count[(iter.second)->first]++;
-		fout << iter.first << ", " << CellClassifier::class_names[(iter.second)->first];
+		cls_count[(iter.cls_result)->first]++;
+		fout << iter.image_url << ", " << CellClassifier::class_names[(iter.cls_result)->first];
 		for (int i = 0; i < 3; i++)
 		{
-			fout << ", " << (iter.second)->second[i];
+			fout << ", " << (iter.cls_result)->second[i];
 		}
+		seg_count[iter.seg_result.major]++;
+		fout << ", " << CellClassifier::class_names[iter.seg_result.major];
+		fout << ", " << iter.seg_result.fg << ", " << iter.seg_result.hf << ", " << iter.seg_result.wt;
 		fout << "\n";
 	}
 	/* Statistics */
-	auto total = count[0] + count[1] + count[2];
+	auto total = cls_count[0] + cls_count[1] + cls_count[2];
 	fout << "\"[ CONCLUSION ] " << total << " images in total";
+	fout << " Cls:";
 	for (int i = 0; i < 3; i++)
 	{
-		fout << ", " << count[i] << " " << CellClassifier::class_names[i]
-			<< " (" << 100 * count[i] / total << "%)";
+		fout << " " << cls_count[i] << " " << CellClassifier::class_names[i]
+			<< " (" << 100 * cls_count[i] / total << "%)";
+	}
+	fout << " Seg:";
+	for (int i = 0; i < 4; i++)
+	{
+		fout << " " << seg_count[i] << " " << CellClassifier::class_names[i]
+			<< " (" << 100 * seg_count[i] / total << "%)";
 	}
 	fout << ".\"\n";
 	fout.close();

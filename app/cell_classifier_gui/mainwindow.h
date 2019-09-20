@@ -23,6 +23,7 @@ public:
 private slots:
     void on_actionOpenImage_triggered();
 	void on_actionOpenFolder_triggered();
+	void on_actionCloseImage_triggered();
 	void on_pushButtonSeg_clicked();
 	void on_radioButtonOri_clicked();
 	void on_radioButtonEnh_clicked();

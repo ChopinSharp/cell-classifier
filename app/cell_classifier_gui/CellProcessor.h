@@ -13,14 +13,38 @@ using std::string;
 struct Seg_Proportion
 {
 	double fg, hf, wt;
+	int major;
 	Seg_Proportion(int fg_c, int hf_c, int wt_c)
 	{
-		double total = fg_c + hf_c + wt_c;
-		fg = fg_c / total;
-		hf = hf_c / total;
-		wt = wt_c / total;
+		if (fg_c == 0 && hf_c == 0 && wt_c == 0)
+		{
+			fg = hf = wt = 0.;
+			major = 3;
+		}
+		else
+		{
+			double total = fg_c + hf_c + wt_c;
+			fg = fg_c / total;
+			hf = hf_c / total;
+			wt = wt_c / total;
+			if (fg_c > hf_c && fg_c > wt_c)			major = 0;
+			else if (hf_c > fg_c && hf_c > wt_c)	major = 1;
+			else if (wt_c > fg_c && wt_c > hf_c)	major = 2;
+			else major = 3;
+		}
 	}
 };
+
+struct Batch_Result_Entry
+{
+	string image_url;
+	shared_ptr<Pred> cls_result;
+	Seg_Proportion seg_result;
+	Batch_Result_Entry(string image_url, shared_ptr<Pred> cls_result, Seg_Proportion seg_result) :
+		image_url(image_url), cls_result(cls_result), seg_result(seg_result) {}
+};
+
+typedef pair<NamedPred, Seg_Proportion> NamedCompoundPred;
 
 class CellProcessor : public QObject
 {
@@ -36,13 +60,14 @@ public:
 	const Mat &get_normalized_image() { return normalized_image; }
 	int get_image_rows() { return original_image.rows; }
 	int get_image_cols() { return original_image.cols; }
-	shared_ptr<Pred> predict_single(const Roi &roi = Roi()) { return classifier.predict_single(normalized_image, roi); };
+	shared_ptr<Pred> predict_single(const Roi &roi = Roi()) { return classifier.predict_single(normalized_image, roi); }
 	void set_segmentation_map(bool fg, bool hf, bool wt);
-	QPixmap get_segmentation_pixmap() {
+	QPixmap get_segmentation_pixmap() 
+	{ 
 		return QPixmap::fromImage(QImage(seg_map.data, seg_map.cols, seg_map.rows, QImage::Format_RGB888)); 
 	}
 	Seg_Proportion calculate_proportion(bool fg_enabled, bool hf_enabled, bool wt_enabled, const Roi &roi = Roi());
-
+	
 	/* Slots and signals for classifier */
 public slots:
 	void predict_batch(QString q_folder_url);
@@ -71,7 +96,7 @@ private:
 	Mat seg_map; // depends on scores_mat and category enable configs
 	CellClassifier classifier;
 	CellSegmenter segmenter;
-	shared_ptr<std::vector<NamedPred>> batch_results;
+	std::vector<Batch_Result_Entry> batch_results;
 
 public:
 	bool has_image;
@@ -79,5 +104,4 @@ public:
 
 public:
 	static const Vec3b palette[4];
-	
 };
